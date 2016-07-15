@@ -453,7 +453,7 @@ def UniqueValueValidation(form, field):
 
 
 def SearchQueryRequired(form, field):
-    if not field.data and not (hasattr(form, 'filter_options') and not form.filter_options.filter_expressions):
+    if not field.data and not (hasattr(form, 'filter_options') and form.filter_options.filter_expressions):
         raise wtforms.validators.ValidationError('Please enter a query or select filters from the advanced options')
 
 
