@@ -143,7 +143,7 @@ class BaseHandlerMixin(object):
         response.redirect_to = str(redirect_url)
 
     @staticmethod
-    def set_query_parameter(url, additional_query_params):
+    def set_query_parameter(url, additional_query_params, keep_blank_values=0):
         """Given a URL, set or replace a query parameter and return the
         modified URL.
 
@@ -156,7 +156,7 @@ class BaseHandlerMixin(object):
         :param additional_query_params dict:
         """
         scheme, netloc, path, query_string, fragment = urlsplit(url)
-        query_params = parse_qs(query_string)
+        query_params = parse_qs(query_string, keep_blank_values=keep_blank_values)
 
         for param_name, param_value in additional_query_params.iteritems():
             query_params[param_name] = [param_value]
@@ -615,7 +615,7 @@ class CrudHandler(BaseFormHandler):
 
 class SearchHandler(BaseFormHandler):
     def __init__(self, search_properties, search_property_map, form=BaseSearchForm, search_handler_map=None,
-                 view_full_result_route=None, **kwargs):
+                 view_full_result_route=None, keep_blank_values=0, **kwargs):
         super(SearchHandler, self).__init__(form=form, **kwargs)
 
         default_handler_map = {
@@ -630,6 +630,7 @@ class SearchHandler(BaseFormHandler):
         self.search_properties = search_properties
         self.search_property_map = search_property_map
         self.view_full_result_route = view_full_result_route
+        self.keep_blank_values = keep_blank_values
 
         self.invalid_search_status_code = self.status_manager.add_status(
             message='Your search was not valid. Please try another one.', status_type='alert')
@@ -657,7 +658,8 @@ class SearchHandler(BaseFormHandler):
                 if search_results.cursor:
                     response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
                                                                                      additional_query_params={
-                                                                                         'cursor': search_results.cursor})
+                                                                                         'cursor': search_results.cursor},
+                                                                                     keep_blank_values=self.keep_blank_values)
                 elif request.params.get('cursor', False):
                     response.raw.search_results_final_page = True
                     response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
