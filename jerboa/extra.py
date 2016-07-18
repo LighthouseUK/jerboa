@@ -664,7 +664,8 @@ class SearchHandler(BaseFormHandler):
                     response.raw.search_results_final_page = True
                     response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
                                                                                      additional_query_params={
-                                                                                         'cursor': ''})
+                                                                                         'cursor': ''},
+                                                                                     keep_blank_values=self.keep_blank_values)
                 response.raw.search_results = search_results
                 response.raw.search_properties = self.search_properties
                 response.raw.search_name_map = self.search_property_map
