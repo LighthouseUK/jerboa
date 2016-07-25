@@ -615,7 +615,7 @@ class CrudHandler(BaseFormHandler):
 
 class SearchHandler(BaseFormHandler):
     def __init__(self, search_properties, search_property_map, form=BaseSearchForm, search_handler_map=None,
-                 view_full_result_route=None, keep_blank_values=0, **kwargs):
+                 view_full_result_route=None, keep_blank_values=0, force_empty_query=False, **kwargs):
         super(SearchHandler, self).__init__(form=form, **kwargs)
 
         default_handler_map = {
@@ -631,6 +631,7 @@ class SearchHandler(BaseFormHandler):
         self.search_property_map = search_property_map
         self.view_full_result_route = view_full_result_route
         self.keep_blank_values = keep_blank_values
+        self.force_empty_query = force_empty_query
 
         self.invalid_search_status_code = self.status_manager.add_status(
             message='Your search was not valid. Please try another one.', status_type='alert')
@@ -651,8 +652,8 @@ class SearchHandler(BaseFormHandler):
                                                                                                     'search.ui'),
                                             formdata=request.GET, form_method=self.form_method)
 
-        if request.params.get('query',
-                              False) is not False or response.raw.status_code == self.invalid_search_status_code:
+        if self.force_empty_query or (request.params.get('query', False) is not False) \
+                or (response.raw.status_code == self.invalid_search_status_code):
             if form.validate():
                 search_results = self._do_search(request=request, response=response, form=form)
                 if search_results.cursor:
