@@ -89,9 +89,9 @@ def add_search_routes(component, handler_object, route_titles=None):
 
 
 class BaseHandlerMixin(object):
-    def __init__(self, component, title_override=None, **kwargs):
-        self.name = component.name
-        self.title = title_override or component.title
+    def __init__(self, component_name, component_title, **kwargs):
+        self.name = component_name
+        self.title = component_title
         self.handler_map = {
             'app_default': 'default',
         }
@@ -614,7 +614,12 @@ class CrudHandler(BaseFormHandler):
 
 
 class SearchHandler(BaseFormHandler):
-    def __init__(self, search_properties, search_property_map, form=BaseSearchForm, search_handler_map=None,
+    """
+    search_properties_to_display is a list of search result properties that you want to display. They will be rendered
+    in the order that you set in the list. If no list is set then all properties will be displayed in the order that
+    they were parsed.
+    """
+    def __init__(self, search_properties_to_display=None, form=BaseSearchForm, search_handler_map=None,
                  view_full_result_route=None, keep_blank_values=0, force_empty_query=False, **kwargs):
         super(SearchHandler, self).__init__(form=form, **kwargs)
 
@@ -627,8 +632,7 @@ class SearchHandler(BaseFormHandler):
             default_handler_map.update(search_handler_map)
 
         self.handler_map.update(default_handler_map)
-        self.search_properties = search_properties
-        self.search_property_map = search_property_map
+        self.search_properties_to_display = search_properties_to_display
         self.view_full_result_route = view_full_result_route
         self.keep_blank_values = keep_blank_values
         self.force_empty_query = force_empty_query
@@ -668,8 +672,7 @@ class SearchHandler(BaseFormHandler):
                                                                                          'cursor': ''},
                                                                                      keep_blank_values=self.keep_blank_values)
                 response.raw.search_results = search_results
-                response.raw.search_properties = self.search_properties
-                response.raw.search_name_map = self.search_property_map
+                response.raw.search_properties = self.search_properties_to_display
                 response.raw.view_full_result_route = self.view_full_result_route
                 response.raw.reset_search_url = self.build_handler_url_with_continue_support(request, 'search.ui')
                 signal('valid_search.action.hook').send(self, request=request, response=response, form=form)
