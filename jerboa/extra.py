@@ -359,8 +359,10 @@ class CrudHandler(BaseFormHandler):
 
     CREATE_FORM_CONFIG_HOOK = 'create_form_config'
     UPDATE_FORM_CONFIG_HOOK = 'update_form_config'
+    DELETE_FORM_CONFIG_HOOK = 'update_form_config'
     CUSTOMIZE_CREATE_FORM_HOOK = 'create_form'
     CUSTOMIZE_UPDATE_FORM_HOOK = 'update_form'
+    CUSTOMIZE_DELETE_FORM_HOOK = 'delete_form'
 
     def __init__(self, read_properties, disabled_create_properties=None,
                  disabled_update_properties=None, crud_handler_map=None, delete_form=DeleteModelForm,
@@ -407,8 +409,10 @@ class CrudHandler(BaseFormHandler):
 
         self._create_form_config_hook = signal(self.CREATE_FORM_CONFIG_HOOK)
         self._update_form_config_hook = signal(self.UPDATE_FORM_CONFIG_HOOK)
+        self._delete_form_config_hook = signal(self.DELETE_FORM_CONFIG_HOOK)
         self._customize_create_form_hook = signal(self.CUSTOMIZE_CREATE_FORM_HOOK)
         self._customize_update_form_hook = signal(self.CUSTOMIZE_UPDATE_FORM_HOOK)
+        self._customize_delete_form_hook = signal(self.CUSTOMIZE_DELETE_FORM_HOOK)
 
     @property
     def _create_ui_hook_enabled(self):
@@ -435,12 +439,20 @@ class CrudHandler(BaseFormHandler):
         return bool(self._update_form_config_hook.receivers)
 
     @property
+    def _delete_form_config_hook_enabled(self):
+        return bool(self._delete_form_config_hook.receivers)
+
+    @property
     def _customize_create_form_hook_enabled(self):
         return bool(self._customize_create_form_hook.receivers)
 
     @property
     def _customize_update_form_hook_enabled(self):
         return bool(self._customize_update_form_hook.receivers)
+
+    @property
+    def _customize_delete_form_hook_enabled(self):
+        return bool(self._customize_delete_form_hook.receivers)
 
     def read_ui(self, request, response):
         """
@@ -571,26 +583,49 @@ class CrudHandler(BaseFormHandler):
                 response.raw.form.validate()
 
     def delete_ui(self, request, response):
-        signal('delete.ui.hook').send(self, request=request, response=response)
-        self.parse_status_code(request=request, response=response)
+        """
+        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
 
+        If you really need to use a different form at run time, you can override the form instance via
+        `_customize_delete_form_hook`.
+
+        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
+        `_delete_form_config_hook` hook. The callback will be passed the form instance for you to modify.
+
+        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
+        do this the form needs data, so we automatically fill this with the request.GET data.
+
+        :param request:
+        :param response:
+        :return:
+        """
         try:
-            model = self._parse_request_model(request=request)
-        except KeyError, e:
-            logging.exception(e)
+            if self._delete_ui_hook_enabled:
+                self._delete_ui_hook.send(self, request=request, response=response)
+        except ClientError, e:
+            logging.exception(u'{} when processing {}.delete_ui'.format(e.message, self.name))
             self.set_redirect_url(request=request, response=response, handler='app_default',
-                                  status_code=self.key_required_status_code)
-            self._parse_redirect(request, response)
-        except ValueError, e:
-            logging.exception(e)
-            self.set_redirect_url(request=request, response=response, handler='app_default',
-                                  status_code=self.key_invalid_status_code)
+                                  status_code=self.generic_failure_status_code)
             self._parse_redirect(request, response)
         else:
-            response.raw.resource_object = model
-            response.raw.read_properties = self.read_properties
-            self._parse_model_ui_form(request=request, response=response, form=self.delete_form,
-                                      existing_model=model, action_method=self.handler_map['delete.action'])
+            self.parse_status_code(request=request, response=response)
+            validate = response.raw.status_code in self.validation_trigger_codes
+            formdata = request.GET if validate else None
+
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.handler_map['delete.action']), formdata=formdata)
+
+            if self._delete_form_config_hook_enabled:
+                self._delete_form_config_hook.send(self, request=request, response=response, form_config=form_config)
+
+            form_instance = self.form(**form_config)
+
+            if self._customize_delete_form_hook_enabled:
+                self._customize_delete_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+            response.raw.form = form_instance
+
+            if validate:
+                response.raw.form.validate()
 
     def create_callback(self, request, response):
         signal('pre_create.action.hook').send(self, request=request, response=response)
