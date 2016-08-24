@@ -4,42 +4,12 @@ from blinker import signal
 from .statusmanager import StatusManager, parse_request_status_code
 from .utils import decode_unicode_request_params, filter_unwanted_params
 from .forms import DeleteModelForm, BaseSearchForm
+from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
 from urllib import urlencode
 from urlparse import parse_qs, urlsplit, urlunsplit
 
 __author__ = 'Matt'
-
-
-# === Exceptions ===
-class UIFailed(Exception):
-    """
-    Can be used by ui functions. Allows them to fail if some condition is not met e.g. request parameter missing.
-    """
-    pass
-
-
-class CallbackFailed(Exception):
-    """
-    Can be used by callback functions that are invoked upon form validation. Allows them to fail despite the form data
-     begin valid e.g. if a unique value already exists.
-    """
-    pass
-
-
-class FormDuplicateValue(ValueError, CallbackFailed):
-    """
-    Can be used by implementors that use the supplied hooks. Say you go to attempt to insert data into a datastore and
-    it fails because a value already exists. Rather than having to do lots of checking and fetching of values, simply
-    pass this exception the field names of the duplicates and raise it. The CRUD handler will do the rest.
-    """
-
-    def __init__(self, duplicates, message=u'Could not save the form because duplicate values were detected'):
-        super(FormDuplicateValue, self).__init__(message)
-        self.duplicates = duplicates
-
-
-# === End Exceptions ===
 
 
 def add_crud_routes(component, handler_object, route_titles=None):
@@ -253,6 +223,35 @@ class BaseFormHandler(BaseHandlerMixin):
 
         return request_config
 
+    def _build_form_config(self, request, response, action_url=None, csrf=True, method='POST', formdata=None, data=None):
+        """
+        Here we build the base config needed to generate a form instance. It includes some sane defaults but you should
+        use the `*_customization` signal to modify this to you needs.
+
+        For example, a common situation would be to provide an existing object to the form. Use the appropriate signal
+        and modify the form config to include `existing_obj`.
+
+        You could also force the use of GET data in order to re-validate a form on the UI side. Simply set `formdata`
+         to request.GET
+
+        :param request:
+        :param response:
+        :param action_url:
+        :param csrf:
+        :param method:
+        :param data:
+        :return:
+        """
+
+        return {
+            'request': request,
+            'csrf': csrf,
+            'formdata': formdata,
+            'data': data,
+            'action_url': action_url if action_url is not None else '',
+            'method': method,
+        }
+
 
 class StandardFormHandler(BaseFormHandler):
     def __init__(self, handler_name, success_function, handler_map=None, success_message=None,
@@ -353,6 +352,16 @@ class StandardFormHandler(BaseFormHandler):
 
 
 class CrudHandler(BaseFormHandler):
+    CREATE_UI_HOOK = 'create_ui'
+    READ_UI_HOOK = 'read_ui'
+    UPDATE_UI_HOOK = 'update_ui'
+    DELETE_UI_HOOK = 'delete_ui'
+
+    CREATE_FORM_CONFIG_HOOK = 'create_form_config'
+    UPDATE_FORM_CONFIG_HOOK = 'update_form_config'
+    CUSTOMIZE_CREATE_FORM_HOOK = 'create_form'
+    CUSTOMIZE_UPDATE_FORM_HOOK = 'update_form'
+
     def __init__(self, read_properties, disabled_create_properties=None,
                  disabled_update_properties=None, crud_handler_map=None, delete_form=DeleteModelForm,
                  force_create_ui_get_data=False, **kwargs):
@@ -391,89 +400,175 @@ class CrudHandler(BaseFormHandler):
         self.delete_success_status_code = self.status_manager.add_status(
             message='Successfully deleted {}.'.format(self.title), status_type='success')
 
-    @staticmethod
-    def _get_model_key(request):
-        uid = request.GET['uid']
-        if uid == 'None':
-            raise ValueError('UID is not set')
-        return uid
+        self._create_ui_hook = signal(self.CREATE_UI_HOOK)
+        self._read_ui_hook = signal(self.READ_UI_HOOK)
+        self._update_ui_hook = signal(self.UPDATE_UI_HOOK)
+        self._delete_ui_hook = signal(self.DELETE_UI_HOOK)
 
-    def _get_model(self, uid):
-        model = self._load_model(uid=uid)
+        self._create_form_config_hook = signal(self.CREATE_FORM_CONFIG_HOOK)
+        self._update_form_config_hook = signal(self.UPDATE_FORM_CONFIG_HOOK)
+        self._customize_create_form_hook = signal(self.CUSTOMIZE_CREATE_FORM_HOOK)
+        self._customize_update_form_hook = signal(self.CUSTOMIZE_UPDATE_FORM_HOOK)
 
-        if not model:
-            raise ValueError('Invalid model key')
+    @property
+    def _create_ui_hook_enabled(self):
+        return bool(self._create_ui_hook.receivers)
 
-        return model
+    @property
+    def _read_ui_hook_enabled(self):
+        return bool(self._read_ui_hook.receivers)
 
-    def _load_model(self, uid):
-        """
-        This method should be defined when using the mixin. Simply load a resource object to be used for the CRUD ops.
-        :param uid:
-        :return ResourceObject:
-        """
-        raise NotImplementedError
+    @property
+    def _update_ui_hook_enabled(self):
+        return bool(self._update_ui_hook.receivers)
 
-    def _parse_model_properties(self, model):
-        parsed_properties = {}
-        for key in self.read_properties:
-            parsed_properties[key] = (getattr(model, key, ''), getattr(model, key, ''))
-        pass
+    @property
+    def _delete_ui_hook_enabled(self):
+        return bool(self._delete_ui_hook.receivers)
 
-    def _parse_request_model(self, request):
-        model_key = self._get_model_key(request=request)
-        return self._get_model(uid=model_key)
+    @property
+    def _create_form_config_hook_enabled(self):
+        return bool(self._create_form_config_hook.receivers)
+
+    @property
+    def _update_form_config_hook_enabled(self):
+        return bool(self._update_form_config_hook.receivers)
+
+    @property
+    def _customize_create_form_hook_enabled(self):
+        return bool(self._customize_create_form_hook.receivers)
+
+    @property
+    def _customize_update_form_hook_enabled(self):
+        return bool(self._customize_update_form_hook.receivers)
 
     def read_ui(self, request, response):
-        signal('read.ui.hook').send(self, request=request, response=response)
-        self.parse_status_code(request=request, response=response)
+        """
+        You should hook into this method to setup whatever you need to build the UI.
+
+        Note: we automatically set the `read_properties` attribute as this is parsed by the handler. If you only want to
+        show certain resource attributes then you can pass a list of them to the constructor via the `read_properties`
+        kwarg.
+
+        - If the resource_uid is invalid then you should raise `InvalidResourceUID`
+        - If the client sent invalid data then raise `ClientError`
+
+        Any other exception will not be caught here and will fall through to the main router, assuming you are using
+        the jerboa router for your app.
+
+        :param request:
+        :param response:
+        :return:
+        """
 
         try:
-            model = self._parse_request_model(request=request)
-        except KeyError, e:
-            logging.exception(e)
-            self.set_redirect_url(request=request, response=response, handler='app_default',
-                                  status_code=self.key_required_status_code)
-            self._parse_redirect(request, response)
-        except ValueError, e:
-            logging.exception(e)
+            if self._read_ui_hook_enabled:
+                self._read_ui_hook.send(self, request=request, response=response)
+            else:
+                raise InvalidResourceUID()
+        except InvalidResourceUID, e:
+            logging.exception(u'{} for {}.read_ui'.format(e.message, self.name))
             self.set_redirect_url(request=request, response=response, handler='app_default',
                                   status_code=self.key_invalid_status_code)
             self._parse_redirect(request, response)
+        except ClientError, e:
+            logging.exception(u'{} when processing {}.read_ui'.format(e.message, self.name))
+            self.set_redirect_url(request=request, response=response, handler='app_default',
+                                  status_code=self.generic_failure_status_code)
+            self._parse_redirect(request, response)
         else:
-            response.raw.resource_object = model
-            if self.read_properties:
-                pass
+            self.parse_status_code(request=request, response=response)
             response.raw.read_properties = self.read_properties
 
     def create_ui(self, request, response):
-        signal('create.ui.hook').send(self, request=request, response=response)
-        self.parse_status_code(request=request, response=response)
-        self._parse_model_ui_form(request=request, response=response, form=self.form,
-                                  action_method=self.handler_map['create.action'],
-                                  disabled_fields=self.disabled_create_properties,
-                                  use_get_data=self.force_create_ui_get_data)
+        """
+        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
 
-    def update_ui(self, request, response):
-        signal('update.ui.hook').send(self, request=request, response=response)
-        self.parse_status_code(request=request, response=response)
+        If you really need to use a different form at run time, you can override the form instance via
+        `_customize_create_form_hook`.
 
+        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
+        `_create_form_config_hook` hook. The callback will be passed the form instance for you to modify.
+
+        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
+        do this the form needs data, so we automatically fill this with the request.GET data.
+
+        :param request:
+        :param response:
+        :return:
+        """
         try:
-            model = self._parse_request_model(request=request)
-        except KeyError, e:
-            logging.exception(e)
+            if self._create_ui_hook_enabled:
+                self._create_ui_hook.send(self, request=request, response=response)
+        except ClientError, e:
+            logging.exception(u'{} when processing {}.create_ui'.format(e.message, self.name))
             self.set_redirect_url(request=request, response=response, handler='app_default',
-                                  status_code=self.key_required_status_code)
-            self._parse_redirect(request, response)
-        except ValueError, e:
-            logging.exception(e)
-            self.set_redirect_url(request=request, response=response, handler='app_default',
-                                  status_code=self.key_invalid_status_code)
+                                  status_code=self.generic_failure_status_code)
             self._parse_redirect(request, response)
         else:
-            self._parse_model_ui_form(request=request, response=response, form=self.form,
-                                      existing_model=model, action_method=self.handler_map['update.action'],
-                                      disabled_fields=self.disabled_update_properties)
+            self.parse_status_code(request=request, response=response)
+            validate = response.raw.status_code in self.validation_trigger_codes
+            formdata = request.GET if validate else None
+
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.handler_map['create.action']), formdata=formdata)
+
+            if self._create_form_config_hook_enabled:
+                self._create_form_config_hook.send(self, request=request, response=response, form_config=form_config)
+
+            form_instance = self.form(**form_config)
+
+            if self._customize_create_form_hook_enabled:
+                self._customize_create_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+            response.raw.form = form_instance
+
+            if validate:
+                response.raw.form.validate()
+
+    def update_ui(self, request, response):
+        """
+        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
+
+        If you really need to use a different form at run time, you can override the form instance via
+        `_customize_update_form_hook`.
+
+        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
+        `_update_form_config_hook` hook. The callback will be passed the form instance for you to modify.
+
+        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
+        do this the form needs data, so we automatically fill this with the request.GET data.
+
+        :param request:
+        :param response:
+        :return:
+        """
+        try:
+            if self._update_ui_hook_enabled:
+                self._update_ui_hook.send(self, request=request, response=response)
+        except ClientError, e:
+            logging.exception(u'{} when processing {}.update_ui'.format(e.message, self.name))
+            self.set_redirect_url(request=request, response=response, handler='app_default',
+                                  status_code=self.generic_failure_status_code)
+            self._parse_redirect(request, response)
+        else:
+            self.parse_status_code(request=request, response=response)
+            validate = response.raw.status_code in self.validation_trigger_codes
+            formdata = request.GET if validate else None
+
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.handler_map['update.action']), formdata=formdata)
+
+            if self._update_form_config_hook_enabled:
+                self._update_form_config_hook.send(self, request=request, response=response, form_config=form_config)
+
+            form_instance = self.form(**form_config)
+
+            if self._customize_update_form_hook_enabled:
+                self._customize_update_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+            response.raw.form = form_instance
+
+            if validate:
+                response.raw.form.validate()
 
     def delete_ui(self, request, response):
         signal('delete.ui.hook').send(self, request=request, response=response)
