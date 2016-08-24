@@ -167,61 +167,61 @@ class BaseFormHandler(BaseHandlerMixin):
         if validation_trigger_codes:
             self.validation_trigger_codes += validation_trigger_codes
 
-    def _generate_form_instance(self, request, form, form_method, existing_model=None, action_url=None,
-                                formdata=None, data=None, disabled_fields=None):
-        # We have to do some hacky fixes for the CSRF protection here.
-        form_config = self._get_request_config(request=request, config_keys=self.request_config_keys)
-
-        if disabled_fields and 'csrf' in disabled_fields:
-            form_config['csrf'] = False
-
-        form_instance = form(request=request,
-                             formdata=formdata,
-                             existing_obj=existing_model,
-                             data=data,
-                             action_url=action_url,
-                             method=form_method,
-                             **form_config)
-
-        if disabled_fields:
-            for field_name in disabled_fields:
-
-                if field_name != 'csrf':
-                    delattr(form_instance, field_name)
-
-        return form_instance
-
-    def _parse_model_ui_form(self, request, response, form, action_method, form_method=None, existing_model=None,
-                             disabled_fields=None, use_get_data=False, data=None, **kwargs):
-        validate = response.raw.status_code in self.validation_trigger_codes
-        formdata = request.GET if validate or use_get_data else None
-        action_url = self.build_handler_url_with_continue_support(request, action_method)
-        if not form_method:
-            form_method = self.form_method
-
-        response.raw.form = self._generate_form_instance(request=request,
-                                                         form=form,
-                                                         action_url=action_url,
-                                                         form_method=form_method,
-                                                         formdata=formdata,
-                                                         existing_model=existing_model,
-                                                         data=data,
-                                                         disabled_fields=disabled_fields)
-
-        if validate:
-            response.raw.form.validate()
-
-    @staticmethod
-    def _get_request_config(request, config_keys):
-        request_config = {}
-
-        for config_key in config_keys:
-            try:
-                request_config.update(request.handler_config[config_key])
-            except KeyError:
-                pass
-
-        return request_config
+    # def _generate_form_instance(self, request, form, form_method, existing_model=None, action_url=None,
+    #                             formdata=None, data=None, disabled_fields=None):
+    #     # We have to do some hacky fixes for the CSRF protection here.
+    #     form_config = self._get_request_config(request=request, config_keys=self.request_config_keys)
+    #
+    #     if disabled_fields and 'csrf' in disabled_fields:
+    #         form_config['csrf'] = False
+    #
+    #     form_instance = form(request=request,
+    #                          formdata=formdata,
+    #                          existing_obj=existing_model,
+    #                          data=data,
+    #                          action_url=action_url,
+    #                          method=form_method,
+    #                          **form_config)
+    #
+    #     if disabled_fields:
+    #         for field_name in disabled_fields:
+    #
+    #             if field_name != 'csrf':
+    #                 delattr(form_instance, field_name)
+    #
+    #     return form_instance
+    #
+    # def _parse_model_ui_form(self, request, response, form, action_method, form_method=None, existing_model=None,
+    #                          disabled_fields=None, use_get_data=False, data=None, **kwargs):
+    #     validate = response.raw.status_code in self.validation_trigger_codes
+    #     formdata = request.GET if validate or use_get_data else None
+    #     action_url = self.build_handler_url_with_continue_support(request, action_method)
+    #     if not form_method:
+    #         form_method = self.form_method
+    #
+    #     response.raw.form = self._generate_form_instance(request=request,
+    #                                                      form=form,
+    #                                                      action_url=action_url,
+    #                                                      form_method=form_method,
+    #                                                      formdata=formdata,
+    #                                                      existing_model=existing_model,
+    #                                                      data=data,
+    #                                                      disabled_fields=disabled_fields)
+    #
+    #     if validate:
+    #         response.raw.form.validate()
+    #
+    # @staticmethod
+    # def _get_request_config(request, config_keys):
+    #     request_config = {}
+    #
+    #     for config_key in config_keys:
+    #         try:
+    #             request_config.update(request.handler_config[config_key])
+    #         except KeyError:
+    #             pass
+    #
+    #     return request_config
 
     def _build_form_config(self, request, response, action_url=None, csrf=True, method='POST', formdata=None, data=None):
         """
@@ -254,7 +254,15 @@ class BaseFormHandler(BaseHandlerMixin):
 
 
 class StandardFormHandler(BaseFormHandler):
-    def __init__(self, handler_name, success_function, handler_map=None, success_message=None,
+    UI_HOOK = 'ui'
+    FORM_CONFIG_HOOK = 'form_config'
+    CUSTOMIZE_FORM_HOOK = 'customize_form'
+    VALID_FORM_HOOK = 'valid_form'
+    FORM_ERROR_HOOK = 'form_error'
+    CALLBACK_FAILED_HOOK = 'callback_failed'
+    DUPLICATE_VALUE_HOOK = 'duplicate_values'
+
+    def __init__(self, handler_name, handler_map=None, success_message=None,
                  failure_message=None, suppress_success_status=False, force_ui_get_data=False,
                  force_callback_get_data=False, **kwargs):
         super(StandardFormHandler, self).__init__(**kwargs)
@@ -274,7 +282,6 @@ class StandardFormHandler(BaseFormHandler):
         self.ui_name = ui_name
         self.callback_name = callback_name
         self.success_name = success_name
-        self.success_function = success_function
         self.force_ui_get_data = force_ui_get_data
         self.force_callback_get_data = force_callback_get_data
 
@@ -293,39 +300,126 @@ class StandardFormHandler(BaseFormHandler):
         else:
             self.failure_status_code = self.generic_failure_status_code
 
+        self._ui_hook = signal(self.UI_HOOK)
+        self._form_config_hook = signal(self.FORM_CONFIG_HOOK)
+        self._customize_form_hook = signal(self.CUSTOMIZE_FORM_HOOK)
+        self._valid_form_hook = signal(self.VALID_FORM_HOOK)
+        self._form_error_hook = signal(self.FORM_ERROR_HOOK)
+        self._callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK)
+        self._duplicate_value_hook = signal(self.DUPLICATE_VALUE_HOOK)
+
+    @property
+    def _ui_hook_enabled(self):
+        return bool(self._ui_hook.receivers)
+
+    @property
+    def _form_config_hook_enabled(self):
+        return bool(self._form_config_hook.receivers)
+
+    @property
+    def _customize_form_hook_enabled(self):
+        return bool(self._customize_form_hook.receivers)
+
+    @property
+    def _valid_form_hook_enabled(self):
+        return bool(self._valid_form_hook.receivers)
+
+    @property
+    def _form_error_hook_enabled(self):
+        return bool(self._form_error_hook.receivers)
+
+    @property
+    def _duplicate_value_hook_enabled(self):
+        return bool(self._duplicate_value_hook.receivers)
+
+    @property
+    def _callback_failed_hook_enabled(self):
+        return bool(self._callback_failed_hook.receivers)
+
     def ui_handler(self, request, response):
+        """
+        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
+
+        If you really need to use a different form at run time, you can override the form instance via
+        `_customize_form_hook`.
+
+        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
+        `_customize_form_hook` hook. The callback will be passed the form instance for you to modify.
+
+        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
+        do this the form needs data, so we automatically fill this with the request.GET data.
+
+        :param request:
+        :param response:
+        :return:
+        """
         try:
-            signal('{}.hook'.format(self.ui_name)).send(self, request=request, response=response)
-        except UIFailed, e:
-            # A connector can raise this exception after setting a redirect uri
+            if self._ui_hook_enabled:
+                self._ui_hook.send(self, request=request, response=response)
+        except ClientError, e:
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.name))
+            self.set_redirect_url(request=request, response=response, handler='app_default',
+                                  status_code=self.generic_failure_status_code)
             self._parse_redirect(request, response)
         else:
-            try:
-                existing_model = response.raw.existing_model
-            except AttributeError:
-                existing_model = None
-
             self.parse_status_code(request=request, response=response)
-            self._parse_model_ui_form(request=request, response=response, form=self.form,
-                                      action_method=self.handler_map[self.callback_name],
-                                      use_get_data=self.force_ui_get_data, form_method=self.form_method,
-                                      existing_model=existing_model)
+            validate = response.raw.status_code in self.validation_trigger_codes
+            formdata = request.GET if validate else None
+
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.callback_name), formdata=formdata)
+
+            if self._form_config_hook_enabled:
+                self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
+
+            form_instance = self.form(**form_config)
+
+            if self._customize_form_hook_enabled:
+                self._customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+            response.raw.form = form_instance
+
+            if validate:
+                response.raw.form.validate()
 
     def callback_handler(self, request, response):
-        signal('pre_{}.hook'.format(self.callback_name)).send(self, request=request, response=response)
+        """
+        If form validation passes the `_valid_form_hook` will be triggered. You can use this to do whatever you need
+        to do after receiving valid data.
 
-        formdata = request.GET if self.force_callback_get_data else None
+        If the form does not validate then the `_form_error_hook` will be triggered. By default we set the redirect url
+        in the response object to go back to the ui handler with the form data as GET attributes. This can be overridden.
 
-        form = self._generate_form_instance(request=request, form=self.form, form_method=self.form_method, formdata=formdata)
+        If the form validates but you raise either CallbackFailed or UIFailed then we will trigger
+        `_callback_failed_hook`. If there are no receivers for this signal then we will redirect to the ui handler in
+        the same manner as a form validation failure. If there are receivers then by default we parse a redirect which
+        is determined by the `response.raw.redirect_to` value. If none is set then an exception will be raised.
 
-        if form.validate():
+        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
+        `_customize_form_hook` hook. The callback will be passed the form instance for you to modify.
+
+
+        :param request:
+        :param response:
+        :return:
+        """
+        form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.callback_name))
+
+        if self._form_config_hook_enabled:
+            self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
+
+        form_instance = self.form(**form_config)
+
+        if self._customize_form_hook_enabled:
+            self._customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+        if form_instance.validate():
             self.set_redirect_url(request=request, response=response, handler=self.success_name,
                                   status_code=self.success_status_code, follow_continue=True)
             try:
-                self.success_function(self, request=request, response=response, form=form)
+                if self._valid_form_hook_enabled:
+                    self._valid_form_hook.send(self, request=request, response=response, form_instance=form_instance)
             except FormDuplicateValue, e:
-                filtered_params = self.filter_unwanted_params(request_params=request.params,
-                                                              unwanted=self.filter_params)
+                filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
 
                 duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
 
@@ -334,19 +428,25 @@ class StandardFormHandler(BaseFormHandler):
                                           status_code=self.failure_status_code, **filtered_params)
                 # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
                 response.redirect_to = u'{}&{}'.format(response.redirect_to, duplicates_query_string)
-                signal('invalid_{}.hook'.format(self.callback_name)).send(self, request=request, response=response)
+
+                if self._duplicate_value_hook_enabled:
+                    self._duplicate_value_hook.send(self, request=request, response=response, form_instance=form_instance, duplicates=e.duplicates)
+
             except (CallbackFailed, UIFailed), e:
-                signal('failed_{}.hook'.format(self.callback_name)).send(self, request=request, response=response)
-                self._parse_redirect(request, response)
-            else:
-                signal('valid_{}.hook'.format(self.callback_name)).send(self, request=request, response=response,
-                                                                        form=form)
+                filtered_params = self.filter_unwanted_params(request_params=request.params,
+                                                              unwanted=self.filter_params)
+                self.set_redirect_url(request=request, response=response, handler=self.ui_name,
+                                      status_code=self.failure_status_code, **filtered_params)
+
+                if self._callback_failed_hook_enabled:
+                    self._callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance)
 
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
             self.set_redirect_url(request=request, response=response, handler=self.ui_name,
                                   status_code=self.failure_status_code, **filtered_params)
-            signal('invalid_{}.hook'.format(self.callback_name)).send(self, request=request, response=response)
+            if self._form_error_hook_enabled:
+                self._form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
 
         self._parse_redirect(request, response)
 
@@ -540,6 +640,9 @@ class CrudHandler(BaseFormHandler):
     def update_ui(self, request, response):
         """
         You must set `form` in the handler config. This should be the class definition and not an instance of the form.
+
+        Generally you will want to add an existing model to the form config. Use `_update_form_config_hook` and set
+        `existing_obj`.
 
         If you really need to use a different form at run time, you can override the form instance via
         `_customize_update_form_hook`.
