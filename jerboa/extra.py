@@ -500,7 +500,7 @@ class CrudHandler(BaseFormHandler):
         `_customize_create_form_hook`.
 
         Note: if you need to customise the form in some way, e.g. to remove a field, then use the
-        `_create_form_config_hook` hook. The callback will be passed the form instance for you to modify.
+        `_customize_create_form_hook` hook. The callback will be passed the form instance for you to modify.
 
         Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
         do this the form needs data, so we automatically fill this with the request.GET data.
@@ -545,7 +545,7 @@ class CrudHandler(BaseFormHandler):
         `_customize_update_form_hook`.
 
         Note: if you need to customise the form in some way, e.g. to remove a field, then use the
-        `_update_form_config_hook` hook. The callback will be passed the form instance for you to modify.
+        `_customize_update_form_hook` hook. The callback will be passed the form instance for you to modify.
 
         Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
         do this the form needs data, so we automatically fill this with the request.GET data.
@@ -590,7 +590,7 @@ class CrudHandler(BaseFormHandler):
         `_customize_delete_form_hook`.
 
         Note: if you need to customise the form in some way, e.g. to remove a field, then use the
-        `_delete_form_config_hook` hook. The callback will be passed the form instance for you to modify.
+        `_customize_delete_form_hook` hook. The callback will be passed the form instance for you to modify.
 
         Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
         do this the form needs data, so we automatically fill this with the request.GET data.
