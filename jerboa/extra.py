@@ -70,21 +70,26 @@ def parse_component_config(component_config):
     pass
 
 
-def crud_handler_definition_generator(component_name, form=None, route_customizations=None, additional_routes=None):
+def crud_handler_definition_generator(component_name, form=None, delete_form=None, route_customizations=None, route_map=None, use_default_delete_form=True):
     """
     `route_customizations` is a dict of handler names => configs. The configs keys are the same as when calling
     `add_route` on a component.
 
-    `additional_routes` is a dict of name/id => route mappings (either webapp2 route name or full url). We use
+    `route_map` is a dict of name/id => route mappings (either webapp2 route name or full url). We use
     dict.update to merge these with the route map. Therefore, if you want to completely override a particular route, for
-    example to redirect back to a home page after login, you could overwrite `create_success`.
+    example to redirect back to a home page after login, you could overwrite one of the mappings.
 
 
+    :param component_name:
     :param form:
-    :param additional_routes:
+    :param delete_form:
+    :param route_map:
     :param route_customizations:
+    :param use_default_delete_form:
+    :type component_name: str
     :type form: object
-    :type additional_routes: dict
+    :type delete_form: object
+    :type route_map: dict
     :type route_customizations: dict
     :return:
     """
@@ -117,15 +122,77 @@ def crud_handler_definition_generator(component_name, form=None, route_customiza
                  u'create.action': u'component.{}.{}.action'.format(component_name, create_name),
                  u'update.action': u'component.{}.{}.action'.format(component_name, update_name),
                  u'delete.action': u'component.{}.{}.action'.format(component_name, delete_name),
-                 u'create_success': u'component.{}.{}.ui'.format(component_name, create_name),
-                 u'update_success': u'component.{}.{}.ui'.format(component_name, create_name)}
+                 u'create.success': u'component.{}.{}.ui'.format(component_name, create_name),
+                 u'update.success': u'component.{}.{}.ui'.format(component_name, update_name),
+                 u'delete.success': u'component.{}.{}.ui'.format(component_name, delete_name)}
 
-    if additional_routes is not None:
-        route_map.update(additional_routes)
+    if route_map is not None:
+        route_map.update(route_map)
 
-    # Update route map with the additional_routes, so we can overwrite even if they use custom route names
+    # Pass in the relevant routes to the StandardFormHandler so that the defaults are overwritten
+    if use_default_delete_form:
+        delete_form = DeleteModelForm
 
-    pass
+    # We explicitly set the routes below so that they apply any overrides that may have been specified. They don't need
+    # to be set is you are instantiating the StandardFormHandler class directly
+    return [
+        {
+            'type': StandardFormHandler,
+            'config': {
+                'form': form,
+                'component_name': component_name,
+                'handler_code_name': create_name,
+                'route_map': {
+                    u'create.ui': route_map[u'create.ui'],
+                    u'create.action': route_map[u'create.action'],
+                    u'create.success': route_map[u'create.success'],
+                }
+            },
+            'route_customizations': route_customizations.get('create', None),
+        },
+        {
+            'type': StandardFormHandler,
+            'config': {
+                'form': form,
+                'component_name': component_name,
+                'handler_code_name': read_name,
+                'route_map': {
+                    u'read.ui': route_map[u'read.ui'],
+                    u'read.action': route_map[u'read.action'],
+                    u'read.success': route_map[u'read.success'],
+                }
+            },
+            'route_customizations': route_customizations.get('read', None),
+        },
+        {
+            'type': StandardFormHandler,
+            'config': {
+                'form': form,
+                'component_name': component_name,
+                'handler_code_name': update_name,
+                'route_map': {
+                    u'update.ui': route_map[u'update.ui'],
+                    u'update.action': route_map[u'update.action'],
+                    u'update.success': route_map[u'update.success'],
+                }
+            },
+            'route_customizations': route_customizations.get('update', None),
+        },
+        {
+            'type': StandardFormHandler,
+            'config': {
+                'form': delete_form,
+                'component_name': component_name,
+                'handler_code_name': delete_name,
+                'route_map': {
+                    u'delete.ui': route_map[u'delete.ui'],
+                    u'delete.action': route_map[u'delete.action'],
+                    u'delete.success': route_map[u'delete.success'],
+                }
+            },
+            'route_customizations': route_customizations.get('delete', None),
+        },
+    ]
 
 
 class BaseHandlerMixin(object):
@@ -149,9 +216,10 @@ class BaseHandlerMixin(object):
         passed to `set_redirect_url`
 
     """
-    def __init__(self, component_name, component_title, **kwargs):
-        self.name = component_name
-        self.title = component_title
+    def __init__(self, handler_code_name, handler_title, component_name, **kwargs):
+        self.component_name = component_name
+        self.handler_name = handler_code_name
+        self.handler_title = handler_title
         self._route_map = {
             'app_default': 'default',
         }
@@ -254,13 +322,13 @@ class BaseFormHandler(BaseHandlerMixin):
             self.request_config_keys = request_config_keys
 
         self.generic_success_status_code = self.status_manager.add_status(
-            message='Successfully completed operation on {}.'.format(self.title), status_type='success')
+            message='Successfully completed operation on {}.'.format(self.handler_title), status_type='success')
         self.generic_failure_status_code = self.status_manager.add_status(
             message='Please correct the errors on the form below.', status_type='alert')
         self.key_required_status_code = self.status_manager.add_status(
-            message='You must supply a {} key.'.format(self.title), status_type='alert')
+            message='You must supply a {} key.'.format(self.handler_title), status_type='alert')
         self.key_invalid_status_code = self.status_manager.add_status(
-            message='You must supply a valid {} key.'.format(self.title), status_type='alert')
+            message='You must supply a valid {} key.'.format(self.handler_title), status_type='alert')
 
         self.validation_trigger_codes = [self.generic_failure_status_code]
         self.form = form
@@ -308,7 +376,7 @@ class StandardFormHandler(BaseFormHandler):
     CALLBACK_FAILED_HOOK = 'callback_failed'
     DUPLICATE_VALUE_HOOK = 'duplicate_values'
 
-    def __init__(self, handler_name, handler_map=None, success_message=None,
+    def __init__(self, handler_name, route_map=None, success_message=None,
                  failure_message=None, suppress_success_status=False, force_ui_get_data=False,
                  force_callback_get_data=False, **kwargs):
         super(StandardFormHandler, self).__init__(**kwargs)
@@ -319,10 +387,10 @@ class StandardFormHandler(BaseFormHandler):
         callback_name = u'{}.action'.format(handler_name)
         success_name = u'{}.success'.format(handler_name)
 
-        default_handler_map = {
-            ui_name: ui_name,
-            callback_name: callback_name,
-            success_name: ui_name,
+        default_route_map = {
+            ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
+            callback_name: u'component.{}.{}.action'.format(self.component_name, self.handler_name),
+            success_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
         }
 
         self.ui_name = ui_name
@@ -331,10 +399,10 @@ class StandardFormHandler(BaseFormHandler):
         self.force_ui_get_data = force_ui_get_data
         self.force_callback_get_data = force_callback_get_data
 
-        if handler_map:
-            default_handler_map.update(handler_map)
+        if route_map:
+            default_route_map.update(route_map)
 
-        self._route_map.update(default_handler_map)
+        self._route_map.update(default_route_map)
 
         if not suppress_success_status and success_message:
             self.success_status_code = self.status_manager.add_status(message=success_message, status_type='success')
@@ -403,7 +471,7 @@ class StandardFormHandler(BaseFormHandler):
             if self._ui_hook_enabled:
                 self._ui_hook.send(self, request=request, response=response)
         except ClientError, e:
-            logging.exception(u'{} when processing {}.ui'.format(e.message, self.name))
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
@@ -537,11 +605,11 @@ class CrudHandler(BaseFormHandler):
         self.force_create_ui_get_data = force_create_ui_get_data
 
         self.create_success_status_code = self.status_manager.add_status(
-            message='Successfully created {}.'.format(self.title), status_type='success')
+            message='Successfully created {}.'.format(self.handler_title), status_type='success')
         self.update_success_status_code = self.status_manager.add_status(
-            message='Successfully updated {}.'.format(self.title), status_type='success')
+            message='Successfully updated {}.'.format(self.handler_title), status_type='success')
         self.delete_success_status_code = self.status_manager.add_status(
-            message='Successfully deleted {}.'.format(self.title), status_type='success')
+            message='Successfully deleted {}.'.format(self.handler_title), status_type='success')
 
         self._create_ui_hook = signal(self.CREATE_UI_HOOK)
         self._read_ui_hook = signal(self.READ_UI_HOOK)
@@ -620,12 +688,12 @@ class CrudHandler(BaseFormHandler):
             else:
                 raise InvalidResourceUID()
         except InvalidResourceUID, e:
-            logging.exception(u'{} for {}.read_ui'.format(e.message, self.name))
+            logging.exception(u'{} for {}.read_ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.key_invalid_status_code)
             self._initiate_redirect(request, response)
         except ClientError, e:
-            logging.exception(u'{} when processing {}.read_ui'.format(e.message, self.name))
+            logging.exception(u'{} when processing {}.read_ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
@@ -654,7 +722,7 @@ class CrudHandler(BaseFormHandler):
             if self._create_ui_hook_enabled:
                 self._create_ui_hook.send(self, request=request, response=response)
         except ClientError, e:
-            logging.exception(u'{} when processing {}.create_ui'.format(e.message, self.name))
+            logging.exception(u'{} when processing {}.create_ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
@@ -702,7 +770,7 @@ class CrudHandler(BaseFormHandler):
             if self._update_ui_hook_enabled:
                 self._update_ui_hook.send(self, request=request, response=response)
         except ClientError, e:
-            logging.exception(u'{} when processing {}.update_ui'.format(e.message, self.name))
+            logging.exception(u'{} when processing {}.update_ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
@@ -747,7 +815,7 @@ class CrudHandler(BaseFormHandler):
             if self._delete_ui_hook_enabled:
                 self._delete_ui_hook.send(self, request=request, response=response)
         except ClientError, e:
-            logging.exception(u'{} when processing {}.delete_ui'.format(e.message, self.name))
+            logging.exception(u'{} when processing {}.delete_ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
