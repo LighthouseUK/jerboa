@@ -67,6 +67,9 @@ class BaseHandlerMixin(object):
     The route_map is a dict of route ID/name => route values. The route ID/name is just a short name used internally by
     the handler - it has nothing to do with webapp2 routes.
 
+    You *must* register all desired routes for the handler if you want to use the built in redirect handling. Should
+    you need to use a route that is not registered you will have to override it using the appropriate hooks.
+
     The route_map config parameter will accept either a webapp2 route name or a full url. So as an example you could:
 
      - Change the `app_default` route to `component.user.read.ui`, which is the name of a webapp2 route. This would then
