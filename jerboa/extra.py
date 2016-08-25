@@ -7,7 +7,7 @@ from .forms import DeleteModelForm, BaseSearchForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
 from urllib import urlencode
-from urlparse import parse_qs, urlsplit, urlunsplit
+from urlparse import parse_qs, urlsplit, urlunsplit, urlparse
 
 __author__ = 'Matt'
 
@@ -62,8 +62,14 @@ class BaseHandlerMixin(object):
     def __init__(self, component_name, component_title, **kwargs):
         self.name = component_name
         self.title = component_title
-        self.handler_map = {
+        self._route_map = {
             'app_default': 'default',
+        }
+        self._full_url_map = {
+
+        }
+        self._route_cache = {
+
         }
         self.status_manager = StatusManager
 
@@ -79,8 +85,24 @@ class BaseHandlerMixin(object):
     def filter_unwanted_params(request_params, unwanted):
         return filter_unwanted_params(request_params=request_params, unwanted=unwanted)
 
+    def _get_route(self, route_name):
+        # TODO: get the route by looking up the name in route map
+        # TODO: after, add to cache to avoid lookup cost each time
+        try:
+            return self._route_cache[route_name]
+        except KeyError:
+            try:
+                full_url = self._full_url_map[self._route_map[route_name]]
+            except KeyError:
+                # TODO: test for valid url in the route map
+                # If not then use webapp2 to parse it
+                pass
+            else:
+                self._route_cache[route_name] = full_url
+                return full_url
+
     def change_handler_mapping(self, handler, new_mapping):
-        self.handler_map[handler] = new_mapping
+        self._route_map[handler] = new_mapping
 
     def _build_minion_route_path(self, method):
         if method == 'default':
@@ -96,7 +118,7 @@ class BaseHandlerMixin(object):
 
     def build_handler_url_with_continue_support(self, request, handler, **kwargs):
         return self.build_url_with_continue_support(request=request, uri_for=self._build_minion_route_path(
-            method=self.handler_map[handler]), **kwargs)
+            method=self._route_map[handler]), **kwargs)
 
     def set_redirect_url(self, request, response, handler, follow_continue=False, **kwargs):
         if request.GET.get('continue_url', False) and follow_continue:
@@ -137,6 +159,19 @@ class BaseHandlerMixin(object):
     @staticmethod
     def _parse_redirect(request, response):
         webapp2.redirect(uri=response.redirect_to, request=request, response=response)
+
+    @staticmethod
+    def valid_url(url):
+        """
+        Credit to: http://stackoverflow.com/a/38020041
+        :param url:
+        :return:
+        """
+        try:
+            result = urlparse(url)
+            return True if [result.scheme, result.netloc, result.path] else False
+        except:
+            return False
 
 
 class BaseFormHandler(BaseHandlerMixin):
@@ -288,7 +323,7 @@ class StandardFormHandler(BaseFormHandler):
         if handler_map:
             default_handler_map.update(handler_map)
 
-        self.handler_map.update(default_handler_map)
+        self._route_map.update(default_handler_map)
 
         if not suppress_success_status and success_message:
             self.success_status_code = self.status_manager.add_status(message=success_message, status_type='success')
@@ -486,7 +521,7 @@ class CrudHandler(BaseFormHandler):
         if crud_handler_map:
             default_handler_map.update(crud_handler_map)
 
-        self.handler_map.update(default_handler_map)
+        self._route_map.update(default_handler_map)
         self.delete_form = delete_form
         self.read_properties = read_properties
         if disabled_create_properties is None:
@@ -622,7 +657,7 @@ class CrudHandler(BaseFormHandler):
             validate = response.raw.status_code in self.validation_trigger_codes
             formdata = request.GET if validate else None
 
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.handler_map['create.action']), formdata=formdata)
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self._route_map['create.action']), formdata=formdata)
 
             if self._create_form_config_hook_enabled:
                 self._create_form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -670,7 +705,7 @@ class CrudHandler(BaseFormHandler):
             validate = response.raw.status_code in self.validation_trigger_codes
             formdata = request.GET if validate else None
 
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.handler_map['update.action']), formdata=formdata)
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self._route_map['update.action']), formdata=formdata)
 
             if self._update_form_config_hook_enabled:
                 self._update_form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -715,7 +750,7 @@ class CrudHandler(BaseFormHandler):
             validate = response.raw.status_code in self.validation_trigger_codes
             formdata = request.GET if validate else None
 
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.handler_map['delete.action']), formdata=formdata)
+            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self._route_map['delete.action']), formdata=formdata)
 
             if self._delete_form_config_hook_enabled:
                 self._delete_form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -864,7 +899,7 @@ class SearchHandler(BaseFormHandler):
         if search_handler_map:
             default_handler_map.update(search_handler_map)
 
-        self.handler_map.update(default_handler_map)
+        self._route_map.update(default_handler_map)
         self.search_properties_to_display = search_properties_to_display
         self.view_full_result_route = view_full_result_route
         self.keep_blank_values = keep_blank_values
@@ -941,7 +976,7 @@ class HeadlessSearchHandler(BaseFormHandler):
         if search_handler_map:
             default_handler_map.update(search_handler_map)
 
-        self.handler_map.update(default_handler_map)
+        self._route_map.update(default_handler_map)
         self.search_properties = search_properties
         self.search_property_map = search_property_map
         self.view_full_result_route = view_full_result_route
