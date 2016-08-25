@@ -67,7 +67,13 @@ class AppRegistry(object):
 def parse_component_config(component_config):
     for component, config in component_config.iteritems():
         AppRegistry.components[component] = Component(name=component, title=config.get('title', None))
-    pass
+
+        for handler_definition in config['handler_definitions']:
+            AppRegistry.handlers['{}_{}'.format(component, handler_definition['config']['handler_code_name'])] = handler_definition['type'](handler_definition['config'])
+            if type(handler_definition['type']) is StandardFormHandler:
+                AppRegistry.components[component].add_route()
+            elif type(handler_definition['type']) is SearchHandler:
+                pass
 
 
 def crud_handler_definition_generator(component_name, form=None, delete_form=None, route_customizations=None, route_map=None, use_default_delete_form=True):
@@ -96,22 +102,22 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
     # Generate handler definitions for each crud route to avoid having to type them out in full each time
 
     try:
-        create_name = route_customizations['create']['route_name']
+        create_name = route_customizations['create.ui']['route_name']
     except KeyError:
         create_name = 'create'
 
     try:
-        read_name = route_customizations['read']['route_name']
+        read_name = route_customizations['read.ui']['route_name']
     except KeyError:
         read_name = 'read'
 
     try:
-        update_name = route_customizations['update']['route_name']
+        update_name = route_customizations['update.ui']['route_name']
     except KeyError:
         update_name = 'update'
 
     try:
-        delete_name = route_customizations['delete']['route_name']
+        delete_name = route_customizations['delete.ui']['route_name']
     except KeyError:
         delete_name = 'delete'
 
@@ -133,6 +139,8 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
     if use_default_delete_form:
         delete_form = DeleteModelForm
 
+    # TODO: default route customisation so we don't have to type them out each time
+
     # We explicitly set the routes below so that they apply any overrides that may have been specified. They don't need
     # to be set is you are instantiating the StandardFormHandler class directly
     return [
@@ -148,7 +156,10 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
                     u'create.success': route_map[u'create.success'],
                 }
             },
-            'route_customizations': route_customizations.get('create', None),
+            'route_customizations': {
+                'create.ui': route_customizations.get('create.ui', None),
+                'create.action': route_customizations.get('create.action', None),
+            }
         },
         {
             'type': StandardFormHandler,
@@ -162,7 +173,10 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
                     u'read.success': route_map[u'read.success'],
                 }
             },
-            'route_customizations': route_customizations.get('read', None),
+            'route_customizations': {
+                'read.ui': route_customizations.get('read.ui', None),
+                'read.action': route_customizations.get('read.action', None),
+            }
         },
         {
             'type': StandardFormHandler,
@@ -176,7 +190,10 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
                     u'update.success': route_map[u'update.success'],
                 }
             },
-            'route_customizations': route_customizations.get('update', None),
+            'route_customizations': {
+                'update.ui': route_customizations.get('update.ui', None),
+                'update.action': route_customizations.get('update.action', None),
+            }
         },
         {
             'type': StandardFormHandler,
@@ -190,7 +207,10 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
                     u'delete.success': route_map[u'delete.success'],
                 }
             },
-            'route_customizations': route_customizations.get('delete', None),
+            'route_customizations': {
+                'delete.ui': route_customizations.get('delete.ui', None),
+                'delete.action': route_customizations.get('delete.action', None),
+            }
         },
     ]
 
