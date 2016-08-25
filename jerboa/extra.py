@@ -64,8 +64,8 @@ class BaseHandlerMixin(object):
     However, at the time of init, webapp2 has not yet been initialized. This means that we have to accept the webapp2
     route names in the config and then parse them on demand (we cache the result so the overhead is minimal).
 
-    The route_map is a dict of route ID => route values. The route ID is just a short name used internally by the
-    handler
+    The route_map is a dict of route ID/name => route values. The route ID/name is just a short name used internally by
+    the handler - it has nothing to do with webapp2 routes.
 
     The route_map config parameter will accept either a webapp2 route name or a full url. So as an example you could:
 
@@ -195,63 +195,8 @@ class BaseFormHandler(BaseHandlerMixin):
         if validation_trigger_codes:
             self.validation_trigger_codes += validation_trigger_codes
 
-    # def _generate_form_instance(self, request, form, form_method, existing_model=None, action_url=None,
-    #                             formdata=None, data=None, disabled_fields=None):
-    #     # We have to do some hacky fixes for the CSRF protection here.
-    #     form_config = self._get_request_config(request=request, config_keys=self.request_config_keys)
-    #
-    #     if disabled_fields and 'csrf' in disabled_fields:
-    #         form_config['csrf'] = False
-    #
-    #     form_instance = form(request=request,
-    #                          formdata=formdata,
-    #                          existing_obj=existing_model,
-    #                          data=data,
-    #                          action_url=action_url,
-    #                          method=form_method,
-    #                          **form_config)
-    #
-    #     if disabled_fields:
-    #         for field_name in disabled_fields:
-    #
-    #             if field_name != 'csrf':
-    #                 delattr(form_instance, field_name)
-    #
-    #     return form_instance
-    #
-    # def _parse_model_ui_form(self, request, response, form, action_method, form_method=None, existing_model=None,
-    #                          disabled_fields=None, use_get_data=False, data=None, **kwargs):
-    #     validate = response.raw.status_code in self.validation_trigger_codes
-    #     formdata = request.GET if validate or use_get_data else None
-    #     action_url = self.build_handler_url_with_continue_support(request, action_method)
-    #     if not form_method:
-    #         form_method = self.form_method
-    #
-    #     response.raw.form = self._generate_form_instance(request=request,
-    #                                                      form=form,
-    #                                                      action_url=action_url,
-    #                                                      form_method=form_method,
-    #                                                      formdata=formdata,
-    #                                                      existing_model=existing_model,
-    #                                                      data=data,
-    #                                                      disabled_fields=disabled_fields)
-    #
-    #     if validate:
-    #         response.raw.form.validate()
-    #
-    # @staticmethod
-    # def _get_request_config(request, config_keys):
-    #     request_config = {}
-    #
-    #     for config_key in config_keys:
-    #         try:
-    #             request_config.update(request.handler_config[config_key])
-    #         except KeyError:
-    #             pass
-    #
-    #     return request_config
-
-    def _build_form_config(self, request, response, action_url=None, csrf=True, method='POST', formdata=None, data=None):
+    @staticmethod
+    def _build_form_config(request, action_url=None, csrf=True, method='POST', formdata=None, data=None):
         """
         Here we build the base config needed to generate a form instance. It includes some sane defaults but you should
         use the `*_customization` signal to modify this to you needs.
@@ -263,7 +208,6 @@ class BaseFormHandler(BaseHandlerMixin):
          to request.GET
 
         :param request:
-        :param response:
         :param action_url:
         :param csrf:
         :param method:
@@ -394,7 +338,7 @@ class StandardFormHandler(BaseFormHandler):
             validate = response.raw.status_code in self.validation_trigger_codes
             formdata = request.GET if validate else None
 
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.callback_name), formdata=formdata)
+            form_config = self._build_form_config(request=request, action_url=self._get_route(route_name=self.callback_name), formdata=formdata)
 
             if self._form_config_hook_enabled:
                 self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -430,7 +374,7 @@ class StandardFormHandler(BaseFormHandler):
         :param response:
         :return:
         """
-        form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self.callback_name))
+        form_config = self._build_form_config(request=request)
 
         if self._form_config_hook_enabled:
             self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -449,13 +393,8 @@ class StandardFormHandler(BaseFormHandler):
             except FormDuplicateValue, e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
 
-                duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
-
-                if not response.redirect_to:
-                    self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
-                                          status_code=self.failure_status_code, **filtered_params)
-                # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
-                response.redirect_to = u'{}&{}'.format(response.redirect_to, duplicates_query_string)
+                self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
+                                      status_code=self.failure_status_code, duplicates=e.duplicates, **filtered_params)
 
                 if self._duplicate_value_hook_enabled:
                     self._duplicate_value_hook.send(self, request=request, response=response, form_instance=form_instance, duplicates=e.duplicates)
