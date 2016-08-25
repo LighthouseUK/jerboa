@@ -59,18 +59,31 @@ def add_search_routes(component, handler_object, route_titles=None):
 
 
 class BaseHandlerMixin(object):
+    """
+    The route handling is a little complicated. We want the allow the routes to be configurable via the handler config.
+    However, at the time of init, webapp2 has not yet been initialized. This means that we have to accept the webapp2
+    route names in the config and then parse them on demand (we cache the result so the overhead is minimal).
+
+    The route_map is a dict of route ID => route values. The route ID is just a short name used internally by the
+    handler
+
+    The route_map config parameter will accept either a webapp2 route name or a full url. So as an example you could:
+
+     - Change the `app_default` route to `component.user.read.ui`, which is the name of a webapp2 route. This would then
+        be parsed to `/user/read` internally and used for any redirects that use the `app_default` id
+
+     - Change the `app_default` route to `http://test.com`. This would then be used whenever the `app_default` id is
+        passed to `set_redirect_url`
+
+    """
     def __init__(self, component_name, component_title, **kwargs):
         self.name = component_name
         self.title = component_title
         self._route_map = {
             'app_default': 'default',
         }
-        self._full_url_map = {
-
-        }
-        self._route_cache = {
-
-        }
+        self._full_url_map = {}
+        self._route_cache = {}
         self.status_manager = StatusManager
 
     @staticmethod
@@ -86,56 +99,36 @@ class BaseHandlerMixin(object):
         return filter_unwanted_params(request_params=request_params, unwanted=unwanted)
 
     def _get_route(self, route_name):
-        # TODO: get the route by looking up the name in route map
-        # TODO: after, add to cache to avoid lookup cost each time
         try:
             return self._route_cache[route_name]
         except KeyError:
             try:
                 full_url = self._full_url_map[self._route_map[route_name]]
             except KeyError:
-                # TODO: test for valid url in the route map
-                # If not then use webapp2 to parse it
-                pass
+                route_url = self._route_map[route_name]
+                if not self.valid_url(route_url):
+                    # If the value is not a full url then we assume it is a webapp2 route name and try to build the url
+                    route_url = webapp2.uri_for(route_url)
+
+                self._full_url_map[self._route_map[route_name]] = route_url
+                self._route_cache[route_name] = route_url
+                return route_url
             else:
                 self._route_cache[route_name] = full_url
                 return full_url
 
-    def change_handler_mapping(self, handler, new_mapping):
-        self._route_map[handler] = new_mapping
-
-    def _build_minion_route_path(self, method):
-        if method == 'default':
-            return 'default'
-        return 'component.{}.{}'.format(self.name, method)
-
-    def build_url_with_continue_support(self, request, uri_for, **kwargs):
-        if request.GET.get('continue_url', False) and not kwargs.get('continue_url', False):
-            return webapp2.uri_for(uri_for, continue_url=request.GET['continue_url'],
-                                   **self.decode_unicode_uri_params(kwargs))
-        else:
-            return webapp2.uri_for(uri_for, **self.decode_unicode_uri_params(kwargs))
-
-    def build_handler_url_with_continue_support(self, request, handler, **kwargs):
-        return self.build_url_with_continue_support(request=request, uri_for=self._build_minion_route_path(
-            method=self._route_map[handler]), **kwargs)
-
-    def set_redirect_url(self, request, response, handler, follow_continue=False, **kwargs):
+    def set_redirect_url(self, request, response, route_name, follow_continue=False, **kwargs):
         if request.GET.get('continue_url', False) and follow_continue:
-            redirect_url = self.set_query_parameter(request.GET['continue_url'], kwargs)
+            redirect_url = self.set_url_query_parameter(request.GET['continue_url'], kwargs)
         else:
-            redirect_url = self.build_handler_url_with_continue_support(request=request, handler=handler, **kwargs)
-        response.redirect_to = str(redirect_url)
+            if request.GET.get('continue_url', False) and not kwargs.get('continue_url', False):
+                kwargs['continue_url'] = request.GET['continue_url']
 
-    def set_external_redirect_url(self, request, response, uri_for, follow_continue=False, **kwargs):
-        if request.GET.get('continue_url', False) and follow_continue:
-            redirect_url = self.set_query_parameter(request.GET['continue_url'], kwargs)
-        else:
-            redirect_url = self.build_url_with_continue_support(request=request, uri_for=uri_for, **kwargs)
+            redirect_url = self.set_url_query_parameter(self._get_route(route_name=route_name), kwargs)
         response.redirect_to = str(redirect_url)
 
     @staticmethod
-    def set_query_parameter(url, additional_query_params, keep_blank_values=0):
+    def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
         """Given a URL, set or replace a query parameter and return the
         modified URL.
 
@@ -145,19 +138,19 @@ class BaseHandlerMixin(object):
 
         Solution originally from: http://stackoverflow.com/a/12897375
         :param url:
-        :param additional_query_params dict:
+        :param new_query_params dict:
         """
         scheme, netloc, path, query_string, fragment = urlsplit(url)
         query_params = parse_qs(query_string, keep_blank_values=keep_blank_values)
 
-        for param_name, param_value in additional_query_params.iteritems():
+        for param_name, param_value in new_query_params.iteritems():
             query_params[param_name] = [param_value]
         new_query_string = urlencode(query_params, doseq=True)
 
         return urlunsplit((scheme, netloc, path, new_query_string, fragment))
 
     @staticmethod
-    def _parse_redirect(request, response):
+    def _initiate_redirect(request, response):
         webapp2.redirect(uri=response.redirect_to, request=request, response=response)
 
     @staticmethod
@@ -393,9 +386,9 @@ class StandardFormHandler(BaseFormHandler):
                 self._ui_hook.send(self, request=request, response=response)
         except ClientError, e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.name))
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
             validate = response.raw.status_code in self.validation_trigger_codes
@@ -448,7 +441,7 @@ class StandardFormHandler(BaseFormHandler):
             self._customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
 
         if form_instance.validate():
-            self.set_redirect_url(request=request, response=response, handler=self.success_name,
+            self.set_redirect_url(request=request, response=response, route_name=self.success_name,
                                   status_code=self.success_status_code, follow_continue=True)
             try:
                 if self._valid_form_hook_enabled:
@@ -459,7 +452,7 @@ class StandardFormHandler(BaseFormHandler):
                 duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
 
                 if not response.redirect_to:
-                    self.set_redirect_url(request=request, response=response, handler=self.ui_name,
+                    self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
                                           status_code=self.failure_status_code, **filtered_params)
                 # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
                 response.redirect_to = u'{}&{}'.format(response.redirect_to, duplicates_query_string)
@@ -470,7 +463,7 @@ class StandardFormHandler(BaseFormHandler):
             except (CallbackFailed, UIFailed), e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
-                self.set_redirect_url(request=request, response=response, handler=self.ui_name,
+                self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
                                       status_code=self.failure_status_code, **filtered_params)
 
                 if self._callback_failed_hook_enabled:
@@ -478,12 +471,12 @@ class StandardFormHandler(BaseFormHandler):
 
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, handler=self.ui_name,
+            self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
                                   status_code=self.failure_status_code, **filtered_params)
             if self._form_error_hook_enabled:
                 self._form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
 
-        self._parse_redirect(request, response)
+        self._initiate_redirect(request, response)
 
 
 class CrudHandler(BaseFormHandler):
@@ -615,14 +608,14 @@ class CrudHandler(BaseFormHandler):
                 raise InvalidResourceUID()
         except InvalidResourceUID, e:
             logging.exception(u'{} for {}.read_ui'.format(e.message, self.name))
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.key_invalid_status_code)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
         except ClientError, e:
             logging.exception(u'{} when processing {}.read_ui'.format(e.message, self.name))
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
             response.raw.read_properties = self.read_properties
@@ -649,9 +642,9 @@ class CrudHandler(BaseFormHandler):
                 self._create_ui_hook.send(self, request=request, response=response)
         except ClientError, e:
             logging.exception(u'{} when processing {}.create_ui'.format(e.message, self.name))
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
             validate = response.raw.status_code in self.validation_trigger_codes
@@ -697,9 +690,9 @@ class CrudHandler(BaseFormHandler):
                 self._update_ui_hook.send(self, request=request, response=response)
         except ClientError, e:
             logging.exception(u'{} when processing {}.update_ui'.format(e.message, self.name))
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
             validate = response.raw.status_code in self.validation_trigger_codes
@@ -742,9 +735,9 @@ class CrudHandler(BaseFormHandler):
                 self._delete_ui_hook.send(self, request=request, response=response)
         except ClientError, e:
             logging.exception(u'{} when processing {}.delete_ui'.format(e.message, self.name))
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.generic_failure_status_code)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
             validate = response.raw.status_code in self.validation_trigger_codes
@@ -779,7 +772,7 @@ class CrudHandler(BaseFormHandler):
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
                 duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
-                self.set_redirect_url(request=request, response=response, handler='create.ui',
+                self.set_redirect_url(request=request, response=response, route_name='create.ui',
                                       status_code=self.generic_failure_status_code, **filtered_params)
                 # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
                 response.redirect_to = u'{}&{}'.format(response.redirect_to, duplicates_query_string)
@@ -790,17 +783,17 @@ class CrudHandler(BaseFormHandler):
                     redirect_kwargs['uid'] = response.raw.created_uid
                 except AttributeError:
                     pass
-                self.set_redirect_url(request=request, response=response, handler='create_success',
+                self.set_redirect_url(request=request, response=response, route_name='create_success',
                                       status_code=self.create_success_status_code, follow_continue=True,
                                       **redirect_kwargs)
 
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, handler='create.ui',
+            self.set_redirect_url(request=request, response=response, route_name='create.ui',
                                   status_code=self.generic_failure_status_code, **filtered_params)
             signal('invalid_create.action.hook').send(self, request=request, response=response)
 
-        self._parse_redirect(request, response)
+        self._initiate_redirect(request, response)
 
     def _do_create(self, request, response, form):
         """
@@ -820,7 +813,7 @@ class CrudHandler(BaseFormHandler):
                                             disabled_fields=self.disabled_update_properties)
 
         if form.validate():
-            self.set_redirect_url(request=request, response=response, handler='update_success', uid=form.uid.data,
+            self.set_redirect_url(request=request, response=response, route_name='update_success', uid=form.uid.data,
                                   status_code=self.update_success_status_code, follow_continue=True)
             try:
                 self._do_update(request=request, response=response, form=form)
@@ -829,18 +822,18 @@ class CrudHandler(BaseFormHandler):
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
                 duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
-                self.set_redirect_url(request=request, response=response, handler='update.ui',
+                self.set_redirect_url(request=request, response=response, route_name='update.ui',
                                       status_code=self.generic_failure_status_code, **filtered_params)
                 # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
                 response.redirect_to = u'{}{}'.format(response.redirect_to, duplicates_query_string)
                 signal('invalid_update.action.hook').send(self, request=request, response=response)
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, handler='update.ui',
+            self.set_redirect_url(request=request, response=response, route_name='update.ui',
                                   status_code=self.generic_failure_status_code, **filtered_params)
             signal('invalid_update.action.hook').send(self, request=request, response=response)
 
-        self._parse_redirect(request, response)
+        self._initiate_redirect(request, response)
 
     def _do_update(self, request, response, form):
         """
@@ -858,17 +851,17 @@ class CrudHandler(BaseFormHandler):
         form = self._generate_form_instance(request=request, form=self.delete_form, form_method=self.form_method)
 
         if form.validate():
-            self.set_redirect_url(request=request, response=response, handler='delete_success',
+            self.set_redirect_url(request=request, response=response, route_name='delete_success',
                                   status_code=self.delete_success_status_code, follow_continue=True)
             self._do_delete(request=request, response=response, form=form)
             signal('valid_delete.action.hook').send(self, request=request, response=response, form=form)
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, handler='delete.ui',
+            self.set_redirect_url(request=request, response=response, route_name='delete.ui',
                                   status_code=self.generic_failure_status_code, **filtered_params)
             signal('invalid_delete.action.hook').send(self, request=request, response=response)
 
-        self._parse_redirect(request, response)
+        self._initiate_redirect(request, response)
 
     def _do_delete(self, request, response, form):
         """
@@ -913,7 +906,7 @@ class SearchHandler(BaseFormHandler):
             signal('search.ui.hook').send(self, request=request, response=response)
         except UIFailed, e:
             # A connector can raise this exception after setting a redirect uri
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
             return
 
         self.parse_status_code(request=request, response=response)
@@ -929,26 +922,26 @@ class SearchHandler(BaseFormHandler):
             if form.validate():
                 search_results = self._do_search(request=request, response=response, form=form)
                 if search_results.cursor:
-                    response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
-                                                                                     additional_query_params={
+                    response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
+                                                                                         new_query_params={
                                                                                          'cursor': search_results.cursor},
-                                                                                     keep_blank_values=self.keep_blank_values)
+                                                                                         keep_blank_values=self.keep_blank_values)
                 elif request.params.get('cursor', False):
                     response.raw.search_results_final_page = True
-                    response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
-                                                                                     additional_query_params={
+                    response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
+                                                                                         new_query_params={
                                                                                          'cursor': ''},
-                                                                                     keep_blank_values=self.keep_blank_values)
+                                                                                         keep_blank_values=self.keep_blank_values)
                 response.raw.search_results = search_results
                 response.raw.search_properties = self.search_properties_to_display
                 response.raw.view_full_result_route = self.view_full_result_route
                 response.raw.reset_search_url = self.build_handler_url_with_continue_support(request, 'search.ui')
                 signal('valid_search.action.hook').send(self, request=request, response=response, form=form)
             elif not response.raw.status_code:
-                self.set_redirect_url(request=request, response=response, handler='search.ui',
+                self.set_redirect_url(request=request, response=response, route_name='search.ui',
                                       status_code=self.invalid_search_status_code)
                 signal('invalid_search.action.hook').send(self, request=request, response=response)
-                self._parse_redirect(request, response)
+                self._initiate_redirect(request, response)
 
         response.raw.form = form
 
@@ -990,7 +983,7 @@ class HeadlessSearchHandler(BaseFormHandler):
             signal('search.ui.hook').send(self, request=request, response=response)
         except UIFailed, e:
             # A connector can raise this exception after setting a redirect uri
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
             return
         self.parse_status_code(request=request, response=response)
 
@@ -1003,29 +996,29 @@ class HeadlessSearchHandler(BaseFormHandler):
         if not form.validate():
             # In theory the sort/filters form should always validate. If it doesn't then you have bad defaults
             # or the user is trying to do some thing you don't want.
-            self.set_redirect_url(request=request, response=response, handler='search.ui',
+            self.set_redirect_url(request=request, response=response, route_name='search.ui',
                                   status_code=self.invalid_search_status_code)
             signal('invalid_search.action.hook').send(self, request=request, response=response)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
 
         query = self._build_query_string(request=request, response=response, form=form)
 
         if not query:
             # This could cause a redirect loop.
-            self.set_redirect_url(request=request, response=response, handler='search.ui',
+            self.set_redirect_url(request=request, response=response, route_name='search.ui',
                                   status_code=self.invalid_search_status_code)
             signal('invalid_search.action.hook').send(self, request=request, response=response)
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
 
         search_results = self._do_search(request=request, response=response, query=query, form=form)
         if search_results.cursor:
-            response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
-                                                                             additional_query_params={
+            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
+                                                                                 new_query_params={
                                                                                  'cursor': search_results.cursor})
         elif request.params.get('cursor', False):
             response.raw.search_results_final_page = True
-            response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
-                                                                             additional_query_params={
+            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
+                                                                                 new_query_params={
                                                                                  'cursor': ''})
         if request.params.get('cancel_uri', False):
             response.raw.cancel_uri = request.params.get('cancel_uri')
@@ -1079,28 +1072,28 @@ class AutoSearchHandler(BaseHandlerMixin):
             signal('search.ui.hook').send(self, request=request, response=response)
         except UIFailed, e:
             # A connector can raise this exception after setting a redirect uri
-            self._parse_redirect(request, response)
+            self._initiate_redirect(request, response)
             return
         self.parse_status_code(request=request, response=response)
 
         try:
             query = self._build_query_string(request=request, response=response)
         except ValueError:
-            self.set_redirect_url(request=request, response=response, handler='app_default',
+            self.set_redirect_url(request=request, response=response, route_name='app_default',
                                   status_code=self.invalid_search_status_code)
             signal('invalid_search.action.hook').send(self, request=request, response=response)
-            return self._parse_redirect(request, response)
+            return self._initiate_redirect(request, response)
 
         search_results = self._do_search(request=request, response=response, query=query)
         # TODO: add proper support for cursors without the use of a form
         if search_results.cursor:
-            response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
-                                                                             additional_query_params={
+            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
+                                                                                 new_query_params={
                                                                                  'cursor': search_results.cursor})
         elif request.params.get('cursor', False):
             response.raw.search_results_final_page = True
-            response.raw.search_results_next_link = self.set_query_parameter(url=request.url,
-                                                                             additional_query_params={
+            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
+                                                                                 new_query_params={
                                                                                  'cursor': ''})
         if request.params.get('cancel_uri', False):
             response.raw.cancel_uri = request.params.get('cancel_uri')
