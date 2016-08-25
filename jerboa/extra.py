@@ -1,6 +1,7 @@
 import inflection
 import logging
 from blinker import signal
+from .routes import Component
 from .statusmanager import StatusManager, parse_request_status_code
 from .utils import decode_unicode_request_params, filter_unwanted_params
 from .forms import DeleteModelForm, BaseSearchForm
@@ -56,6 +57,17 @@ def add_search_routes(component, handler_object, route_titles=None):
     component.add_route(route_type='action',
                         route_name='search',
                         handler=handler_object.search_callback)
+
+
+class AppRegistry(object):
+    components = {}
+    handlers = {}  # handlers['component_name']['handler_name'] e.g. handlers['user']['read']?
+
+
+def parse_component_config(component_config):
+    for component, config in component_config.iteritems():
+        AppRegistry.components[component] = Component(name=component, title=config.get('title', None))
+    pass
 
 
 class BaseHandlerMixin(object):
