@@ -70,6 +70,64 @@ def parse_component_config(component_config):
     pass
 
 
+def crud_handler_definition_generator(component_name, form=None, route_customizations=None, additional_routes=None):
+    """
+    `route_customizations` is a dict of handler names => configs. The configs keys are the same as when calling
+    `add_route` on a component.
+
+    `additional_routes` is a dict of name/id => route mappings (either webapp2 route name or full url). We use
+    dict.update to merge these with the route map. Therefore, if you want to completely override a particular route, for
+    example to redirect back to a home page after login, you could overwrite `create_success`.
+
+
+    :param form:
+    :param additional_routes:
+    :param route_customizations:
+    :type form: object
+    :type additional_routes: dict
+    :type route_customizations: dict
+    :return:
+    """
+    # Generate handler definitions for each crud route to avoid having to type them out in full each time
+
+    try:
+        create_name = route_customizations['create']['route_name']
+    except KeyError:
+        create_name = 'create'
+
+    try:
+        read_name = route_customizations['read']['route_name']
+    except KeyError:
+        read_name = 'read'
+
+    try:
+        update_name = route_customizations['update']['route_name']
+    except KeyError:
+        update_name = 'update'
+
+    try:
+        delete_name = route_customizations['delete']['route_name']
+    except KeyError:
+        delete_name = 'delete'
+
+    route_map = {u'create.ui': u'component.{}.{}.ui'.format(component_name, create_name),
+                 u'read.ui': u'component.{}.{}.ui'.format(component_name, read_name),
+                 u'update.ui': u'component.{}.{}.ui'.format(component_name, update_name),
+                 u'delete.ui': u'component.{}.{}.ui'.format(component_name, delete_name),
+                 u'create.action': u'component.{}.{}.action'.format(component_name, create_name),
+                 u'update.action': u'component.{}.{}.action'.format(component_name, update_name),
+                 u'delete.action': u'component.{}.{}.action'.format(component_name, delete_name),
+                 u'create_success': u'component.{}.{}.ui'.format(component_name, create_name),
+                 u'update_success': u'component.{}.{}.ui'.format(component_name, create_name)}
+
+    if additional_routes is not None:
+        route_map.update(additional_routes)
+
+    # Update route map with the additional_routes, so we can overwrite even if they use custom route names
+
+    pass
+
+
 class BaseHandlerMixin(object):
     """
     The route handling is a little complicated. We want the allow the routes to be configurable via the handler config.
@@ -124,6 +182,7 @@ class BaseHandlerMixin(object):
                 if not self.valid_url(route_url):
                     # If the value is not a full url then we assume it is a webapp2 route name and try to build the url
                     route_url = webapp2.uri_for(route_url)
+                    # TODO: handle 'default'; if webapp2 fails to parse it then use '/' instead?
 
                 self._full_url_map[self._route_map[route_name]] = route_url
                 self._route_cache[route_name] = route_url
