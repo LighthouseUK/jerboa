@@ -80,6 +80,28 @@ def extract_params(request):
     return uri, http_method, body, headers
 
 
+def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
+    """Given a URL, set or replace a query parameter and return the
+    modified URL.
+
+        set_query_parameter('http://example.com?foo=bar&biz=baz', {'foo', 'stuff'})
+
+        'http://example.com?foo=stuff&biz=baz'
+
+    Solution originally from: http://stackoverflow.com/a/12897375
+    :param url:
+    :param new_query_params dict:
+    """
+    scheme, netloc, path, query_string, fragment = urlsplit(url)
+    query_params = parse_qs(query_string, keep_blank_values=keep_blank_values)
+
+    for param_name, param_value in new_query_params.iteritems():
+        query_params[param_name] = [param_value]
+    new_query_string = urlencode(query_params, doseq=True)
+
+    return urlunsplit((scheme, netloc, path, new_query_string, fragment))
+
+
 # Loading pycountry was annoying me with all of it's debug messages. As the data is relatively static it makes sense to
 # hard code it.
 STATIC_COUNTRY_LABLES_TUPLE = (

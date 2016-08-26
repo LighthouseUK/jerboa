@@ -3,7 +3,7 @@ import logging
 from blinker import signal
 from .routes import Component
 from .statusmanager import StatusManager, parse_request_status_code
-from .utils import decode_unicode_request_params, filter_unwanted_params
+from .utils import decode_unicode_request_params, filter_unwanted_params, set_url_query_parameter
 from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
@@ -292,27 +292,7 @@ class BaseHandlerMixin(object):
     def set_redirect_url(self, response, **kwargs):
         response.redirect_to = self.get_route_url(response=response, **kwargs)
 
-    @staticmethod
-    def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
-        """Given a URL, set or replace a query parameter and return the
-        modified URL.
-
-            set_query_parameter('http://example.com?foo=bar&biz=baz', {'foo', 'stuff'})
-
-            'http://example.com?foo=stuff&biz=baz'
-
-        Solution originally from: http://stackoverflow.com/a/12897375
-        :param url:
-        :param new_query_params dict:
-        """
-        scheme, netloc, path, query_string, fragment = urlsplit(url)
-        query_params = parse_qs(query_string, keep_blank_values=keep_blank_values)
-
-        for param_name, param_value in new_query_params.iteritems():
-            query_params[param_name] = [param_value]
-        new_query_string = urlencode(query_params, doseq=True)
-
-        return urlunsplit((scheme, netloc, path, new_query_string, fragment))
+    set_url_query_parameter = staticmethod(set_url_query_parameter)
 
     @staticmethod
     def _initiate_redirect(request, response):
