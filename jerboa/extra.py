@@ -7,6 +7,7 @@ from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
 from urlparse import urlparse
+from datetime import datetime
 
 __author__ = 'Matt'
 
@@ -366,6 +367,17 @@ class BaseFormHandler(BaseHandlerMixin):
             'action_url': action_url if action_url is not None else '',
             'method': method,
         }
+
+
+def default_form_csrf_config(sender, request, response, form_config):
+    form_config['csrf_context'] = request.secrets.getbyteliteral('csrf_secret')
+    form_config['csrf_secret'] = request.environ['beaker.session']
+    form_config['csrf_time_limit'] = datetime.timedelta(minutes=request.secrets.getint('csrf_time_limit'))
+
+
+def default_form_recaptcha_config(sender, request, response, form_config):
+    form_config['recaptcha_site_key'] = request.secrets.get('recaptcha_site_key')
+    form_config['recaptcha_site_secret'] = request.secrets.get('recaptcha_site_secret')
 
 
 class StandardFormHandler(BaseFormHandler):
