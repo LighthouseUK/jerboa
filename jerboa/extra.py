@@ -661,7 +661,7 @@ class SearchHandler(BaseFormHandler):
         else:
             self.parse_status_code(request=request, response=response)
 
-            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET)
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET, method='GET')
 
             if self._form_config_hook_enabled:
                 self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -741,7 +741,7 @@ class HeadlessSearchHandler(SearchHandler):
         else:
             self.parse_status_code(request=request, response=response)
 
-            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET)
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET, method='GET')
 
             if self._form_config_hook_enabled:
                 self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
