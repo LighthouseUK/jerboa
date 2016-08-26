@@ -4,7 +4,7 @@ from blinker import signal
 from .routes import Component
 from .statusmanager import StatusManager, parse_request_status_code
 from .utils import decode_unicode_request_params, filter_unwanted_params
-from .forms import DeleteModelForm, BaseSearchForm
+from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
 from urllib import urlencode
@@ -13,55 +13,9 @@ from urlparse import parse_qs, urlsplit, urlunsplit, urlparse
 __author__ = 'Matt'
 
 
-def add_crud_routes(component, handler_object, route_titles=None):
-    if not route_titles:
-        route_titles = {}
-
-    component.add_route(route_type='rendered',
-                        route_name='create',
-                        route_title=route_titles.get('create.ui', u'Create {}'.format(component.title)),
-                        handler=handler_object.create_ui)
-    component.add_route(route_type='rendered',
-                        route_name='read',
-                        route_title=route_titles.get('read.ui', u'Read {}'.format(component.title)),
-                        handler=handler_object.read_ui)
-    component.add_route(route_type='rendered',
-                        route_name='update',
-                        route_title=route_titles.get('update.ui', u'Update {}'.format(component.title)),
-                        handler=handler_object.update_ui)
-    component.add_route(route_type='rendered',
-                        route_name='delete',
-                        route_title=route_titles.get('delete.ui', u'Delete {}'.format(component.title)),
-                        handler=handler_object.delete_ui)
-    component.add_route(route_type='action',
-                        route_name='create',
-                        handler=handler_object.create_callback)
-    component.add_route(route_type='action',
-                        route_name='update',
-                        handler=handler_object.update_callback)
-    component.add_route(route_type='action',
-                        route_name='delete',
-                        handler=handler_object.delete_callback)
-
-
-def add_search_routes(component, handler_object, route_titles=None):
-    if not route_titles:
-        route_titles = {}
-
-    default_search_title = u'Search {}'.format(inflection.pluralize(component.title))
-
-    component.add_route(route_type='rendered',
-                        route_name='search',
-                        route_title=route_titles.get('search.ui', default_search_title),
-                        handler=handler_object.search_ui)
-    component.add_route(route_type='action',
-                        route_name='search',
-                        handler=handler_object.search_callback)
-
-
 class AppRegistry(object):
     components = {}
-    handlers = {}  # handlers['component_name']['handler_name'] e.g. handlers['user']['read']?
+    handlers = {}
 
 
 def parse_component_config(component_config):
@@ -69,17 +23,61 @@ def parse_component_config(component_config):
         AppRegistry.components[component] = Component(name=component, title=config.get('title', None))
 
         for handler_definition in config['handler_definitions']:
-            AppRegistry.handlers['{}_{}'.format(component, handler_definition['config']['handler_code_name'])] = handler_definition['type'](handler_definition['config'])
+            code_name = handler_definition['config']['handler_code_name']
+            handler_name = '{}_{}'.format(component, code_name)
+            AppRegistry.handlers[handler_name] = handler_definition['type'](handler_definition['config'])
+
+            title = u'{} {}'.format(code_name.title(), config['title']) if config.get('title', False) else code_name.title()
+
+            ui_default_config = {
+                'route_type': 'rendered',
+                'route_name': code_name,
+                'route_title': title,
+                'handler': AppRegistry.handlers[handler_name].ui_handler,
+                'page_template': 'extra/{}.html'.format(code_name),
+            }
+            action_default_config = {
+                'route_type': 'action',
+                'route_name': code_name,
+                'handler': AppRegistry.handlers[handler_name].action_handler,
+            }
             if type(handler_definition['type']) is StandardFormHandler:
-                AppRegistry.components[component].add_route()
+                try:
+                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                    action_default_config.update(handler_definition['config']['route_customization'][code_name])
+                except KeyError:
+                    pass
+
+                AppRegistry.components[component].add_route(**ui_default_config)
+                AppRegistry.components[component].add_route(**action_default_config)
             elif type(handler_definition['type']) is SearchHandler:
-                pass
+                try:
+                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                except KeyError:
+                    pass
+
+                AppRegistry.components[component].add_route(**ui_default_config)
+            elif type(handler_definition['type']) is HeadlessSearchHandler:
+                try:
+                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                except KeyError:
+                    pass
+
+                AppRegistry.components[component].add_route(**ui_default_config)
+            elif type(handler_definition['type']) is AutoSearchHandler:
+                try:
+                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                except KeyError:
+                    pass
+
+                AppRegistry.components[component].add_route(**ui_default_config)
 
 
-def crud_handler_definition_generator(component_name, form=None, delete_form=None, route_customizations=None, route_map=None, use_default_delete_form=True):
+def crud_handler_definition_generator(component_name, form=PlaceholderForm, delete_form=DeleteModelForm, route_customizations=None, route_map=None):
     """
     `route_customizations` is a dict of handler names => configs. The configs keys are the same as when calling
-    `add_route` on a component.
+    `add_route` on a component, with the exception of the `route_type` key as this is set by the generator based on the
+    handler type
 
     `route_map` is a dict of name/id => route mappings (either webapp2 route name or full url). We use
     dict.update to merge these with the route map. Therefore, if you want to completely override a particular route, for
@@ -91,7 +89,6 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
     :param delete_form:
     :param route_map:
     :param route_customizations:
-    :param use_default_delete_form:
     :type component_name: str
     :type form: object
     :type delete_form: object
@@ -134,10 +131,6 @@ def crud_handler_definition_generator(component_name, form=None, delete_form=Non
 
     if route_map is not None:
         route_map.update(route_map)
-
-    # Pass in the relevant routes to the StandardFormHandler so that the defaults are overwritten
-    if use_default_delete_form:
-        delete_form = DeleteModelForm
 
     # TODO: default route customisation so we don't have to type them out each time
 
@@ -240,8 +233,9 @@ class BaseHandlerMixin(object):
         self.component_name = component_name
         self.handler_name = handler_code_name
         self.handler_title = handler_title
+        self.default_route = u'app_default'
         self._route_map = {
-            'app_default': 'default',
+            self.default_route: u'default',
         }
         self._full_url_map = {}
         self._route_cache = {}
@@ -269,8 +263,15 @@ class BaseHandlerMixin(object):
                 route_url = self._route_map[route_name]
                 if not self.valid_url(route_url):
                     # If the value is not a full url then we assume it is a webapp2 route name and try to build the url
-                    route_url = webapp2.uri_for(route_url)
-                    # TODO: handle 'default'; if webapp2 fails to parse it then use '/' instead?
+                    try:
+                        route_url = webapp2.uri_for(route_url)
+                    except KeyError:
+                        # By default, we will redirect to '/' unless `default` is explicitly set in the app. This
+                        # allows us to show friendly error messages instead of returning a http 500 error
+                        if route_name != 'default':
+                            raise
+                        else:
+                            route_url = '/'
 
                 self._full_url_map[self._route_map[route_name]] = route_url
                 self._route_cache[route_name] = route_url
@@ -279,15 +280,17 @@ class BaseHandlerMixin(object):
                 self._route_cache[route_name] = full_url
                 return full_url
 
-    def set_redirect_url(self, request, response, route_name, follow_continue=False, **kwargs):
+    def get_route_url(self, request, route_name, follow_continue=False, **kwargs):
         if request.GET.get('continue_url', False) and follow_continue:
-            redirect_url = self.set_url_query_parameter(request.GET['continue_url'], kwargs)
+            return str(self.set_url_query_parameter(request.GET['continue_url'], kwargs))
         else:
             if request.GET.get('continue_url', False) and not kwargs.get('continue_url', False):
                 kwargs['continue_url'] = request.GET['continue_url']
 
-            redirect_url = self.set_url_query_parameter(self._get_route(route_name=route_name), kwargs)
-        response.redirect_to = str(redirect_url)
+            return str(self.set_url_query_parameter(self._get_route(route_name=route_name), kwargs))
+
+    def set_redirect_url(self, response, **kwargs):
+        response.redirect_to = self.get_route_url(response=response, **kwargs)
 
     @staticmethod
     def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
@@ -396,16 +399,16 @@ class StandardFormHandler(BaseFormHandler):
     CALLBACK_FAILED_HOOK = 'callback_failed'
     DUPLICATE_VALUE_HOOK = 'duplicate_values'
 
-    def __init__(self, handler_name, route_map=None, success_message=None,
+    def __init__(self, form=PlaceholderForm, route_map=None, success_message=None,
                  failure_message=None, suppress_success_status=False, force_ui_get_data=False,
                  force_callback_get_data=False, **kwargs):
-        super(StandardFormHandler, self).__init__(**kwargs)
+        super(StandardFormHandler, self).__init__(form=form, **kwargs)
 
         # Default mapping for handlers. These can be overridden but by default it will redirect back to the ui handler
         # upon success, with a success status code in the query string
-        ui_name = u'{}.ui'.format(handler_name)
-        callback_name = u'{}.action'.format(handler_name)
-        success_name = u'{}.success'.format(handler_name)
+        ui_name = u'{}.ui'.format(self.handler_name)
+        callback_name = u'{}.action'.format(self.handler_name)
+        success_name = u'{}.success'.format(self.handler_name)
 
         default_route_map = {
             ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
@@ -490,9 +493,9 @@ class StandardFormHandler(BaseFormHandler):
         try:
             if self._ui_hook_enabled:
                 self._ui_hook.send(self, request=request, response=response)
-        except ClientError, e:
+        except (ClientError, UIFailed), e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
+            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
                                   status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
         else:
@@ -500,7 +503,7 @@ class StandardFormHandler(BaseFormHandler):
             validate = response.raw.status_code in self.validation_trigger_codes
             formdata = request.GET if validate else None
 
-            form_config = self._build_form_config(request=request, action_url=self._get_route(route_name=self.callback_name), formdata=formdata)
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.callback_name), formdata=formdata)
 
             if self._form_config_hook_enabled:
                 self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
@@ -560,7 +563,6 @@ class StandardFormHandler(BaseFormHandler):
 
                 if self._duplicate_value_hook_enabled:
                     self._duplicate_value_hook.send(self, request=request, response=response, form_instance=form_instance, duplicates=e.duplicates)
-
             except (CallbackFailed, UIFailed), e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
@@ -580,419 +582,38 @@ class StandardFormHandler(BaseFormHandler):
         self._initiate_redirect(request, response)
 
 
-class CrudHandler(BaseFormHandler):
-    CREATE_UI_HOOK = 'create_ui'
-    READ_UI_HOOK = 'read_ui'
-    UPDATE_UI_HOOK = 'update_ui'
-    DELETE_UI_HOOK = 'delete_ui'
-
-    CREATE_FORM_CONFIG_HOOK = 'create_form_config'
-    UPDATE_FORM_CONFIG_HOOK = 'update_form_config'
-    DELETE_FORM_CONFIG_HOOK = 'update_form_config'
-    CUSTOMIZE_CREATE_FORM_HOOK = 'create_form'
-    CUSTOMIZE_UPDATE_FORM_HOOK = 'update_form'
-    CUSTOMIZE_DELETE_FORM_HOOK = 'delete_form'
-
-    def __init__(self, read_properties, disabled_create_properties=None,
-                 disabled_update_properties=None, crud_handler_map=None, delete_form=DeleteModelForm,
-                 force_create_ui_get_data=False, **kwargs):
-        super(CrudHandler, self).__init__(**kwargs)
-
-        default_handler_map = {
-            'crud_default': 'read.ui',
-            'create_success': 'read.ui',
-            'update_success': 'read.ui',
-            'delete_success': 'search.ui',
-            'create.ui': 'create.ui',
-            'read.ui': 'read.ui',
-            'update.ui': 'update.ui',
-            'delete.ui': 'delete.ui',
-            'create.action': 'create.action',
-            'update.action': 'update.action',
-            'delete.action': 'delete.action',
-        }
-
-        if crud_handler_map:
-            default_handler_map.update(crud_handler_map)
-
-        self._route_map.update(default_handler_map)
-        self.delete_form = delete_form
-        self.read_properties = read_properties
-        if disabled_create_properties is None:
-            disabled_create_properties = ['uid']
-        self.disabled_create_properties = disabled_create_properties
-        self.disabled_update_properties = disabled_update_properties or []
-        self.force_create_ui_get_data = force_create_ui_get_data
-
-        self.create_success_status_code = self.status_manager.add_status(
-            message='Successfully created {}.'.format(self.handler_title), status_type='success')
-        self.update_success_status_code = self.status_manager.add_status(
-            message='Successfully updated {}.'.format(self.handler_title), status_type='success')
-        self.delete_success_status_code = self.status_manager.add_status(
-            message='Successfully deleted {}.'.format(self.handler_title), status_type='success')
-
-        self._create_ui_hook = signal(self.CREATE_UI_HOOK)
-        self._read_ui_hook = signal(self.READ_UI_HOOK)
-        self._update_ui_hook = signal(self.UPDATE_UI_HOOK)
-        self._delete_ui_hook = signal(self.DELETE_UI_HOOK)
-
-        self._create_form_config_hook = signal(self.CREATE_FORM_CONFIG_HOOK)
-        self._update_form_config_hook = signal(self.UPDATE_FORM_CONFIG_HOOK)
-        self._delete_form_config_hook = signal(self.DELETE_FORM_CONFIG_HOOK)
-        self._customize_create_form_hook = signal(self.CUSTOMIZE_CREATE_FORM_HOOK)
-        self._customize_update_form_hook = signal(self.CUSTOMIZE_UPDATE_FORM_HOOK)
-        self._customize_delete_form_hook = signal(self.CUSTOMIZE_DELETE_FORM_HOOK)
-
-    @property
-    def _create_ui_hook_enabled(self):
-        return bool(self._create_ui_hook.receivers)
-
-    @property
-    def _read_ui_hook_enabled(self):
-        return bool(self._read_ui_hook.receivers)
-
-    @property
-    def _update_ui_hook_enabled(self):
-        return bool(self._update_ui_hook.receivers)
-
-    @property
-    def _delete_ui_hook_enabled(self):
-        return bool(self._delete_ui_hook.receivers)
-
-    @property
-    def _create_form_config_hook_enabled(self):
-        return bool(self._create_form_config_hook.receivers)
-
-    @property
-    def _update_form_config_hook_enabled(self):
-        return bool(self._update_form_config_hook.receivers)
-
-    @property
-    def _delete_form_config_hook_enabled(self):
-        return bool(self._delete_form_config_hook.receivers)
-
-    @property
-    def _customize_create_form_hook_enabled(self):
-        return bool(self._customize_create_form_hook.receivers)
-
-    @property
-    def _customize_update_form_hook_enabled(self):
-        return bool(self._customize_update_form_hook.receivers)
-
-    @property
-    def _customize_delete_form_hook_enabled(self):
-        return bool(self._customize_delete_form_hook.receivers)
-
-    def read_ui(self, request, response):
-        """
-        You should hook into this method to setup whatever you need to build the UI.
-
-        Note: we automatically set the `read_properties` attribute as this is parsed by the handler. If you only want to
-        show certain resource attributes then you can pass a list of them to the constructor via the `read_properties`
-        kwarg.
-
-        - If the resource_uid is invalid then you should raise `InvalidResourceUID`
-        - If the client sent invalid data then raise `ClientError`
-
-        Any other exception will not be caught here and will fall through to the main router, assuming you are using
-        the jerboa router for your app.
-
-        :param request:
-        :param response:
-        :return:
-        """
-
-        try:
-            if self._read_ui_hook_enabled:
-                self._read_ui_hook.send(self, request=request, response=response)
-            else:
-                raise InvalidResourceUID()
-        except InvalidResourceUID, e:
-            logging.exception(u'{} for {}.read_ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
-                                  status_code=self.key_invalid_status_code)
-            self._initiate_redirect(request, response)
-        except ClientError, e:
-            logging.exception(u'{} when processing {}.read_ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
-                                  status_code=self.generic_failure_status_code)
-            self._initiate_redirect(request, response)
-        else:
-            self.parse_status_code(request=request, response=response)
-            response.raw.read_properties = self.read_properties
-
-    def create_ui(self, request, response):
-        """
-        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
-
-        If you really need to use a different form at run time, you can override the form instance via
-        `_customize_create_form_hook`.
-
-        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
-        `_customize_create_form_hook` hook. The callback will be passed the form instance for you to modify.
-
-        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
-        do this the form needs data, so we automatically fill this with the request.GET data.
-
-        :param request:
-        :param response:
-        :return:
-        """
-        try:
-            if self._create_ui_hook_enabled:
-                self._create_ui_hook.send(self, request=request, response=response)
-        except ClientError, e:
-            logging.exception(u'{} when processing {}.create_ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
-                                  status_code=self.generic_failure_status_code)
-            self._initiate_redirect(request, response)
-        else:
-            self.parse_status_code(request=request, response=response)
-            validate = response.raw.status_code in self.validation_trigger_codes
-            formdata = request.GET if validate else None
-
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self._route_map['create.action']), formdata=formdata)
-
-            if self._create_form_config_hook_enabled:
-                self._create_form_config_hook.send(self, request=request, response=response, form_config=form_config)
-
-            form_instance = self.form(**form_config)
-
-            if self._customize_create_form_hook_enabled:
-                self._customize_create_form_hook.send(self, request=request, response=response, form_instance=form_instance)
-
-            response.raw.form = form_instance
-
-            if validate:
-                response.raw.form.validate()
-
-    def update_ui(self, request, response):
-        """
-        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
-
-        Generally you will want to add an existing model to the form config. Use `_update_form_config_hook` and set
-        `existing_obj`.
-
-        If you really need to use a different form at run time, you can override the form instance via
-        `_customize_update_form_hook`.
-
-        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
-        `_customize_update_form_hook` hook. The callback will be passed the form instance for you to modify.
-
-        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
-        do this the form needs data, so we automatically fill this with the request.GET data.
-
-        :param request:
-        :param response:
-        :return:
-        """
-        try:
-            if self._update_ui_hook_enabled:
-                self._update_ui_hook.send(self, request=request, response=response)
-        except ClientError, e:
-            logging.exception(u'{} when processing {}.update_ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
-                                  status_code=self.generic_failure_status_code)
-            self._initiate_redirect(request, response)
-        else:
-            self.parse_status_code(request=request, response=response)
-            validate = response.raw.status_code in self.validation_trigger_codes
-            formdata = request.GET if validate else None
-
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self._route_map['update.action']), formdata=formdata)
-
-            if self._update_form_config_hook_enabled:
-                self._update_form_config_hook.send(self, request=request, response=response, form_config=form_config)
-
-            form_instance = self.form(**form_config)
-
-            if self._customize_update_form_hook_enabled:
-                self._customize_update_form_hook.send(self, request=request, response=response, form_instance=form_instance)
-
-            response.raw.form = form_instance
-
-            if validate:
-                response.raw.form.validate()
-
-    def delete_ui(self, request, response):
-        """
-        You must set `form` in the handler config. This should be the class definition and not an instance of the form.
-
-        If you really need to use a different form at run time, you can override the form instance via
-        `_customize_delete_form_hook`.
-
-        Note: if you need to customise the form in some way, e.g. to remove a field, then use the
-        `_customize_delete_form_hook` hook. The callback will be passed the form instance for you to modify.
-
-        Note: by default we will trigger a form validation if the status code is in the list of triggers. In order to
-        do this the form needs data, so we automatically fill this with the request.GET data.
-
-        :param request:
-        :param response:
-        :return:
-        """
-        try:
-            if self._delete_ui_hook_enabled:
-                self._delete_ui_hook.send(self, request=request, response=response)
-        except ClientError, e:
-            logging.exception(u'{} when processing {}.delete_ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
-                                  status_code=self.generic_failure_status_code)
-            self._initiate_redirect(request, response)
-        else:
-            self.parse_status_code(request=request, response=response)
-            validate = response.raw.status_code in self.validation_trigger_codes
-            formdata = request.GET if validate else None
-
-            form_config = self._build_form_config(request=request, response=response, action_url=self.build_handler_url_with_continue_support(request, self._route_map['delete.action']), formdata=formdata)
-
-            if self._delete_form_config_hook_enabled:
-                self._delete_form_config_hook.send(self, request=request, response=response, form_config=form_config)
-
-            form_instance = self.form(**form_config)
-
-            if self._customize_delete_form_hook_enabled:
-                self._customize_delete_form_hook.send(self, request=request, response=response, form_instance=form_instance)
-
-            response.raw.form = form_instance
-
-            if validate:
-                response.raw.form.validate()
-
-    def create_callback(self, request, response):
-        signal('pre_create.action.hook').send(self, request=request, response=response)
-
-        form = self._generate_form_instance(request=request, form=self.form, form_method=self.form_method,
-                                            disabled_fields=self.disabled_create_properties)
-
-        if form.validate():
-            try:
-                self._do_create(request=request, response=response, form=form)
-                signal('valid_create.action.hook').send(self, request=request, response=response, form=form)
-            except FormDuplicateValue, e:
-                filtered_params = self.filter_unwanted_params(request_params=request.params,
-                                                              unwanted=self.filter_params)
-                duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
-                self.set_redirect_url(request=request, response=response, route_name='create.ui',
-                                      status_code=self.generic_failure_status_code, **filtered_params)
-                # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
-                response.redirect_to = u'{}&{}'.format(response.redirect_to, duplicates_query_string)
-                signal('invalid_create.action.hook').send(self, request=request, response=response)
-            else:
-                redirect_kwargs = {}
-                try:
-                    redirect_kwargs['uid'] = response.raw.created_uid
-                except AttributeError:
-                    pass
-                self.set_redirect_url(request=request, response=response, route_name='create_success',
-                                      status_code=self.create_success_status_code, follow_continue=True,
-                                      **redirect_kwargs)
-
-        else:
-            filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, route_name='create.ui',
-                                  status_code=self.generic_failure_status_code, **filtered_params)
-            signal('invalid_create.action.hook').send(self, request=request, response=response)
-
-        self._initiate_redirect(request, response)
-
-    def _do_create(self, request, response, form):
-        """
-        You should define this method to perform the necessary actions for creating a resource from a verified forms
-        data.
-        :param request:
-        :param response:
-        :param form:
-        :return:
-        """
-        raise NotImplementedError
-
-    def update_callback(self, request, response):
-        signal('pre_update.action.hook').send(self, request=request, response=response)
-
-        form = self._generate_form_instance(request=request, form=self.form, form_method=self.form_method,
-                                            disabled_fields=self.disabled_update_properties)
-
-        if form.validate():
-            self.set_redirect_url(request=request, response=response, route_name='update_success', uid=form.uid.data,
-                                  status_code=self.update_success_status_code, follow_continue=True)
-            try:
-                self._do_update(request=request, response=response, form=form)
-                signal('valid_update.action.hook').send(self, request=request, response=response, form=form)
-            except FormDuplicateValue, e:
-                filtered_params = self.filter_unwanted_params(request_params=request.params,
-                                                              unwanted=self.filter_params)
-                duplicates_query_string = '&'.join('duplicate={}'.format(s) for s in e.duplicates)
-                self.set_redirect_url(request=request, response=response, route_name='update.ui',
-                                      status_code=self.generic_failure_status_code, **filtered_params)
-                # This is crude but there isn't an easy means of using webapp2.uri_for with an array for an arg
-                response.redirect_to = u'{}{}'.format(response.redirect_to, duplicates_query_string)
-                signal('invalid_update.action.hook').send(self, request=request, response=response)
-        else:
-            filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, route_name='update.ui',
-                                  status_code=self.generic_failure_status_code, **filtered_params)
-            signal('invalid_update.action.hook').send(self, request=request, response=response)
-
-        self._initiate_redirect(request, response)
-
-    def _do_update(self, request, response, form):
-        """
-        You should define this method to perform the necessary actions to update a resource from a verified forms data.
-        :param request:
-        :param response:
-        :param form:
-        :return:
-        """
-        raise NotImplementedError
-
-    def delete_callback(self, request, response):
-        signal('pre_delete.action.hook').send(self, request=request, response=response)
-
-        form = self._generate_form_instance(request=request, form=self.delete_form, form_method=self.form_method)
-
-        if form.validate():
-            self.set_redirect_url(request=request, response=response, route_name='delete_success',
-                                  status_code=self.delete_success_status_code, follow_continue=True)
-            self._do_delete(request=request, response=response, form=form)
-            signal('valid_delete.action.hook').send(self, request=request, response=response, form=form)
-        else:
-            filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, route_name='delete.ui',
-                                  status_code=self.generic_failure_status_code, **filtered_params)
-            signal('invalid_delete.action.hook').send(self, request=request, response=response)
-
-        self._initiate_redirect(request, response)
-
-    def _do_delete(self, request, response, form):
-        """
-        You should define this method to perform the necessary actions to delete a resource using a verified forms data.
-        :param request:
-        :param response:
-        :param form:
-        :return:
-        """
-        raise NotImplementedError
-
-
 class SearchHandler(BaseFormHandler):
     """
+    If you perform a search, and there are results, you should set `response.raw.search_results` via `_valid_form_hook`.
+    You can then use then setup the default receiver for search results to save you having to repeat the same code
+    for every search handler.
+
+
     search_properties_to_display is a list of search result properties that you want to display. They will be rendered
     in the order that you set in the list. If no list is set then all properties will be displayed in the order that
     they were parsed.
     """
+    UI_HOOK = 'ui'
+    RESULTS_UI_HOOK = 'results_ui'
+    FORM_CONFIG_HOOK = 'form_config'
+    CUSTOMIZE_FORM_HOOK = 'customize_form'
+    VALID_FORM_HOOK = 'valid_form'
+    FORM_ERROR_HOOK = 'form_error'
+    CALLBACK_FAILED_HOOK = 'callback_failed'
+
     def __init__(self, search_properties_to_display=None, form=BaseSearchForm, search_handler_map=None,
                  view_full_result_route=None, keep_blank_values=0, force_empty_query=False, **kwargs):
         super(SearchHandler, self).__init__(form=form, **kwargs)
 
+        ui_name = u'{}.ui'.format(self.handler_name)
         default_handler_map = {
-            'search.ui': 'search.ui',
-            'search.action': 'search.action',
+            ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
         }
 
         if search_handler_map:
             default_handler_map.update(search_handler_map)
 
+        self.ui_name = ui_name
         self._route_map.update(default_handler_map)
         self.search_properties_to_display = search_properties_to_display
         self.view_full_result_route = view_full_result_route
@@ -1002,225 +623,196 @@ class SearchHandler(BaseFormHandler):
         self.invalid_search_status_code = self.status_manager.add_status(
             message='Your search was not valid. Please try another one.', status_type='alert')
 
+        self._ui_hook = signal(self.UI_HOOK)
+        self._results_ui_hook = signal(self.RESULTS_UI_HOOK)
+        self._form_config_hook = signal(self.FORM_CONFIG_HOOK)
+        self._customize_form_hook = signal(self.CUSTOMIZE_FORM_HOOK)
+        self._valid_form_hook = signal(self.VALID_FORM_HOOK)
+        self._form_error_hook = signal(self.FORM_ERROR_HOOK)
+        self._callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK)
+
+    @property
+    def _ui_hook_enabled(self):
+        return bool(self._ui_hook.receivers)
+
+    @property
+    def _results_ui_hook_enabled(self):
+        return bool(self._results_ui_hook.receivers)
+
+    @property
+    def _form_config_hook_enabled(self):
+        return bool(self._form_config_hook.receivers)
+
+    @property
+    def _customize_form_hook_enabled(self):
+        return bool(self._customize_form_hook.receivers)
+
+    @property
+    def _valid_form_hook_enabled(self):
+        return bool(self._valid_form_hook.receivers)
+
+    @property
+    def _form_error_hook_enabled(self):
+        return bool(self._form_error_hook.receivers)
+
+    @property
+    def _callback_failed_hook_enabled(self):
+        return bool(self._callback_failed_hook.receivers)
+
     def search_ui(self, request, response):
         try:
-            signal('search.ui.hook').send(self, request=request, response=response)
-        except UIFailed, e:
-            # A connector can raise this exception after setting a redirect uri
+            if self._ui_hook_enabled:
+                self._ui_hook.send(self, request=request, response=response)
+        except (ClientError, UIFailed), e:
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
+                                  status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
-            return
+        else:
+            self.parse_status_code(request=request, response=response)
 
-        self.parse_status_code(request=request, response=response)
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET)
 
-        form = self._generate_form_instance(request=request,
-                                            form=self.form,
-                                            action_url=self.build_handler_url_with_continue_support(request,
-                                                                                                    'search.ui'),
-                                            formdata=request.GET, form_method=self.form_method)
+            if self._form_config_hook_enabled:
+                self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
 
-        if self.force_empty_query or (request.params.get('query', False) is not False) \
-                or (response.raw.status_code == self.invalid_search_status_code):
-            if form.validate():
-                search_results = self._do_search(request=request, response=response, form=form)
-                if search_results.cursor:
-                    response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
-                                                                                         new_query_params={
-                                                                                         'cursor': search_results.cursor},
-                                                                                         keep_blank_values=self.keep_blank_values)
-                elif request.params.get('cursor', False):
-                    response.raw.search_results_final_page = True
-                    response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
-                                                                                         new_query_params={
-                                                                                         'cursor': ''},
-                                                                                         keep_blank_values=self.keep_blank_values)
-                response.raw.search_results = search_results
-                response.raw.search_properties = self.search_properties_to_display
-                response.raw.view_full_result_route = self.view_full_result_route
-                response.raw.reset_search_url = self.build_handler_url_with_continue_support(request, 'search.ui')
-                signal('valid_search.action.hook').send(self, request=request, response=response, form=form)
-            elif not response.raw.status_code:
-                self.set_redirect_url(request=request, response=response, route_name='search.ui',
-                                      status_code=self.invalid_search_status_code)
-                signal('invalid_search.action.hook').send(self, request=request, response=response)
+            form_instance = self.form(**form_config)
+
+            if self._customize_form_hook_enabled:
+                self._customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+            response.raw.form = form_instance
+
+            if self.force_empty_query or (request.params.get('query', False) is not False) \
+                    or (response.raw.status_code == self.invalid_search_status_code):
+                if form_instance.validate():
+                    try:
+                        if self._valid_form_hook_enabled:
+                            self._valid_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    except (CallbackFailed, UIFailed), e:
+                        self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+
+                        if self._callback_failed_hook_enabled:
+                            self._callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+                        self._initiate_redirect(request, response)
+                    else:
+                        if self._results_ui_hook_enabled:
+                            self._results_ui_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+                elif not response.raw.status_code:
+                    self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+
+                    if self._form_error_hook_enabled:
+                        self._form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+                    self._initiate_redirect(request, response)
+
+
+def default_search_results_ui(sender, request, response, form_instance):
+    """
+    This handles the most common UI values that you would need to set when using the GAE search API. You may also want
+    to set `response.raw.search_result_properties` to limit which data is show in the results table.
+    :param sender:
+    :param request:
+    :param response:
+    :param form_instance:
+    :return:
+    """
+    if response.raw.search_results.cursor:
+        response.raw.search_results_next_link = sender.set_url_query_parameter(url=request.url,
+                                                                               new_query_params={
+                                                                                   'cursor': response.raw.search_results.cursor},
+                                                                               keep_blank_values=sender.keep_blank_values)
+    elif request.params.get('cursor', False):
+        response.raw.search_results_final_page = True
+        response.raw.search_results_next_link = sender.set_url_query_parameter(url=request.url,
+                                                                               new_query_params={
+                                                                                   'cursor': ''},
+                                                                               keep_blank_values=sender.keep_blank_values)
+    response.raw.view_full_result_route = sender.view_full_result_route
+    response.raw.reset_search_url = sender.get_route_url(request=request, route_name=sender.ui_name)
+
+
+class HeadlessSearchHandler(SearchHandler):
+    """
+    This is almost exactly the same as the standard SearchHandler. The only difference is the way the form validation
+    is handled. You should use the same hooks for performing searches and modifying the UI as the standard handler.
+    """
+    def search_ui(self, request, response):
+        try:
+            if self._ui_hook_enabled:
+                self._ui_hook.send(self, request=request, response=response)
+        except (ClientError, UIFailed), e:
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
+                                  status_code=self.generic_failure_status_code)
+            self._initiate_redirect(request, response)
+        else:
+            self.parse_status_code(request=request, response=response)
+
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET)
+
+            if self._form_config_hook_enabled:
+                self._form_config_hook.send(self, request=request, response=response, form_config=form_config)
+
+            form_instance = self.form(**form_config)
+
+            if self._customize_form_hook_enabled:
+                self._customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+            response.raw.form = form_instance
+
+            if not form_instance.validate():
+                self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+
+                if self._form_error_hook_enabled:
+                    self._form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
+
                 self._initiate_redirect(request, response)
 
-        response.raw.form = form
+            try:
+                if self._valid_form_hook_enabled:
+                    self._valid_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+            except (CallbackFailed, UIFailed), e:
+                self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
-    def _do_search(self, request, response, form):
-        """
-        You should define this method to perform the necessary actions to search for resources using forms data.
-        :param request:
-        :param response:
-        :param form:
-        :return:
-        """
-        raise NotImplementedError
+                if self._callback_failed_hook_enabled:
+                    self._callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance)
+
+                self._initiate_redirect(request, response)
+            else:
+                if self._results_ui_hook_enabled:
+                    self._results_ui_hook.send(self, request=request, response=response, form_instance=form_instance)
 
 
-class HeadlessSearchHandler(BaseFormHandler):
-    def __init__(self, search_properties, search_property_map, form=BaseSearchForm, search_handler_map=None,
-                 view_full_result_route=None, cancel_text=None, **kwargs):
-        super(HeadlessSearchHandler, self).__init__(form=form, **kwargs)
-
-        default_handler_map = {
-            'search.ui': 'search.ui',
-            'search.action': 'search.action',
-        }
-
-        if search_handler_map:
-            default_handler_map.update(search_handler_map)
-
-        self._route_map.update(default_handler_map)
-        self.search_properties = search_properties
-        self.search_property_map = search_property_map
-        self.view_full_result_route = view_full_result_route
-        self.cancel_text = cancel_text
-
-        self.invalid_search_status_code = self.status_manager.add_status(
-            message='Your search was not valid. Please try another one.', status_type='alert')
-
+class AutoSearchHandler(SearchHandler):
+    """
+    This is almost exactly the same as the standard SearchHandler. The only difference is the lack of form validation.
+    You should use the same hooks for performing searches and modifying the UI as the standard handler.
+    """
     def search_ui(self, request, response):
         try:
-            signal('search.ui.hook').send(self, request=request, response=response)
-        except UIFailed, e:
-            # A connector can raise this exception after setting a redirect uri
+            if self._ui_hook_enabled:
+                self._ui_hook.send(self, request=request, response=response)
+        except (ClientError, UIFailed), e:
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
+                                  status_code=self.generic_failure_status_code)
             self._initiate_redirect(request, response)
-            return
-        self.parse_status_code(request=request, response=response)
+        else:
+            self.parse_status_code(request=request, response=response)
 
-        form = self._generate_form_instance(request=request,
-                                            form=self.form,
-                                            action_url=self.build_handler_url_with_continue_support(request,
-                                                                                                    'search.ui'),
-                                            formdata=request.GET, form_method=self.form_method)
+            try:
+                if self._valid_form_hook_enabled:
+                    self._valid_form_hook.send(self, request=request, response=response, form_instance=None)
+            except (CallbackFailed, UIFailed), e:
+                self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
-        if not form.validate():
-            # In theory the sort/filters form should always validate. If it doesn't then you have bad defaults
-            # or the user is trying to do some thing you don't want.
-            self.set_redirect_url(request=request, response=response, route_name='search.ui',
-                                  status_code=self.invalid_search_status_code)
-            signal('invalid_search.action.hook').send(self, request=request, response=response)
-            self._initiate_redirect(request, response)
+                if self._callback_failed_hook_enabled:
+                    self._callback_failed_hook.send(self, request=request, response=response, form_instance=None)
 
-        query = self._build_query_string(request=request, response=response, form=form)
-
-        if not query:
-            # This could cause a redirect loop.
-            self.set_redirect_url(request=request, response=response, route_name='search.ui',
-                                  status_code=self.invalid_search_status_code)
-            signal('invalid_search.action.hook').send(self, request=request, response=response)
-            self._initiate_redirect(request, response)
-
-        search_results = self._do_search(request=request, response=response, query=query, form=form)
-        if search_results.cursor:
-            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
-                                                                                 new_query_params={
-                                                                                 'cursor': search_results.cursor})
-        elif request.params.get('cursor', False):
-            response.raw.search_results_final_page = True
-            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
-                                                                                 new_query_params={
-                                                                                 'cursor': ''})
-        if request.params.get('cancel_uri', False):
-            response.raw.cancel_uri = request.params.get('cancel_uri')
-            response.raw.cancel_text = self.cancel_text
-
-        response.raw.search_results = search_results
-        response.raw.search_properties = self.search_properties
-        response.raw.search_name_map = self.search_property_map
-        response.raw.view_full_result_route = self.view_full_result_route
-        response.raw.reset_search_url = self.build_handler_url_with_continue_support(request, 'search.ui')
-        signal('valid_search.action.hook').send(self, request=request, response=response, form=form)
-
-        response.raw.form = form
-
-    def _build_query_string(self, request, response, form):
-        """
-        You should define this method to format a query string that will be used to search. This is the headless part
-        of the handler because they user has no ability to control it, outside of sort, filter options.
-        :param request:
-        :param response:
-        :param form:
-        :return:
-        """
-        raise NotImplementedError
-
-    def _do_search(self, request, response, query, form):
-        """
-        You should define this method to perform the necessary actions to search for resources using forms data.
-        :param request:
-        :param response:
-        :param form:
-        :return:
-        """
-        raise NotImplementedError
-
-
-class AutoSearchHandler(BaseHandlerMixin):
-    def __init__(self, search_properties, search_property_map, view_full_result_route=None, cancel_text=None, **kwargs):
-        super(AutoSearchHandler, self).__init__(**kwargs)
-
-        self.search_properties = search_properties
-        self.search_property_map = search_property_map
-        self.view_full_result_route = view_full_result_route
-        self.cancel_text = cancel_text
-
-        self.invalid_search_status_code = self.status_manager.add_status(
-            message='Your search was not valid. Please try another one.', status_type='alert')
-
-    def search_ui(self, request, response):
-        try:
-            signal('search.ui.hook').send(self, request=request, response=response)
-        except UIFailed, e:
-            # A connector can raise this exception after setting a redirect uri
-            self._initiate_redirect(request, response)
-            return
-        self.parse_status_code(request=request, response=response)
-
-        try:
-            query = self._build_query_string(request=request, response=response)
-        except ValueError:
-            self.set_redirect_url(request=request, response=response, route_name='app_default',
-                                  status_code=self.invalid_search_status_code)
-            signal('invalid_search.action.hook').send(self, request=request, response=response)
-            return self._initiate_redirect(request, response)
-
-        search_results = self._do_search(request=request, response=response, query=query)
-        # TODO: add proper support for cursors without the use of a form
-        if search_results.cursor:
-            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
-                                                                                 new_query_params={
-                                                                                 'cursor': search_results.cursor})
-        elif request.params.get('cursor', False):
-            response.raw.search_results_final_page = True
-            response.raw.search_results_next_link = self.set_url_query_parameter(url=request.url,
-                                                                                 new_query_params={
-                                                                                 'cursor': ''})
-        if request.params.get('cancel_uri', False):
-            response.raw.cancel_uri = request.params.get('cancel_uri')
-            response.raw.cancel_text = self.cancel_text
-
-        response.raw.search_results = search_results
-        response.raw.search_properties = self.search_properties
-        response.raw.search_name_map = self.search_property_map
-        response.raw.view_full_result_route = self.view_full_result_route
-        signal('valid_search.action.hook').send(self, request=request, response=response)
-
-    def _build_query_string(self, request, response):
-        """
-        You should define this method to format a query string that will be used to search. This is the headless part
-        of the handler because they user has no ability to control it.
-        :param request:
-        :param response:
-        :return:
-        """
-        raise NotImplementedError
-
-    def _do_search(self, request, response, query):
-        """
-        You should define this method to perform the necessary actions to search for resources.
-        :param request:
-        :param response:
-        :return:
-        """
-        raise NotImplementedError
+                self._initiate_redirect(request, response)
+            else:
+                if self._results_ui_hook_enabled:
+                    self._results_ui_hook.send(self, request=request, response=response, form_instance=None)

@@ -671,6 +671,12 @@ class BaseModelForm(BaseForm, BaseModelMixin):
     pass
 
 
+class PlaceholderForm(BaseForm):
+    placeholder = wtforms.fields.StringField(label=i18n.lazy_gettext('Placeholder'),
+                                             default='Example Input',
+                                             validators=[wtforms.validators.InputRequired()])
+
+
 class LoginForm(BaseForm, AuthIDMixin, PasswordMixin):
     class Meta:
         csrf = False
