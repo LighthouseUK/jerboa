@@ -6,6 +6,8 @@ import pytz
 import json
 from babel import Locale
 from webapp2_extras import i18n
+from urllib import urlencode
+from urlparse import parse_qs, urlsplit, urlunsplit
 
 __author__ = 'Matt'
 

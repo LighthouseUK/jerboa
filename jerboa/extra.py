@@ -1,4 +1,3 @@
-import inflection
 import logging
 from blinker import signal
 from .routes import Component
@@ -7,8 +6,7 @@ from .utils import decode_unicode_request_params, filter_unwanted_params, set_ur
 from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
-from urllib import urlencode
-from urlparse import parse_qs, urlsplit, urlunsplit, urlparse
+from urlparse import urlparse
 
 __author__ = 'Matt'
 
