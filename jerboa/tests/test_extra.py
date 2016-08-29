@@ -1,4 +1,4 @@
-# TODO: test that config is parsed correctly and that we end up with component and handlers; check names and attributes
+# test that config is parsed correctly and that we end up with component and handlers; check names and attributes
 # TODO: test that the handlers operate without any receivers being registered; allows fast prototyping
 # TODO: test customizing form config + overrides
 # TODO: test customizing form elements
