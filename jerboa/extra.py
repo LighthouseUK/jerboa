@@ -42,8 +42,8 @@ def parse_component_config(component_config):
             }
             if type(handler_definition['type']) is StandardFormHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
-                    action_default_config.update(handler_definition['config']['route_customization'][code_name])
+                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
+                    action_default_config.update(handler_definition['config']['route_customization'].get('action', {}))
                 except KeyError:
                     pass
 
@@ -51,21 +51,21 @@ def parse_component_config(component_config):
                 AppRegistry.components[component].add_route(**action_default_config)
             elif type(handler_definition['type']) is SearchHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
                 except KeyError:
                     pass
 
                 AppRegistry.components[component].add_route(**ui_default_config)
             elif type(handler_definition['type']) is HeadlessSearchHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
                 except KeyError:
                     pass
 
                 AppRegistry.components[component].add_route(**ui_default_config)
             elif type(handler_definition['type']) is AutoSearchHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'][code_name])
+                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
                 except KeyError:
                     pass
 
@@ -74,9 +74,20 @@ def parse_component_config(component_config):
 
 def crud_handler_definition_generator(component_name, form=PlaceholderForm, delete_form=DeleteModelForm, route_customizations=None, route_map=None):
     """
-    `route_customizations` is a dict of handler names => configs. The configs keys are the same as when calling
-    `add_route` on a component, with the exception of the `route_type` key as this is set by the generator based on the
-    handler type
+    `route_customizations` is a dict of the formate:
+
+    customizations = {
+        'ui': {...}
+        'action': {...}
+    }
+
+    The contents of the `ui` and `action` dicts are the same as the kwargs for adding a component route. However,
+    because we are generating the config for crud handlers, you should not set the `route_type` key unless you really
+    know what you are doing. Chances are, using a different type will cause unexpected behaviour.
+
+    Note: If you set `route_name`, only the value from the `ui` dict will be used. So if you set `route_name` in the UI
+    dict to 'register' and then set it in the `action` dict as 'update', the component will be called 'register', and
+    so will the route. You can obviously change this by modifying the output of this function.
 
     `route_map` is a dict of name/id => route mappings (either webapp2 route name or full url). We use
     dict.update to merge these with the route map. Therefore, if you want to completely override a particular route, for
@@ -98,22 +109,22 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
     # Generate handler definitions for each crud route to avoid having to type them out in full each time
 
     try:
-        create_name = route_customizations['create.ui']['route_name']
+        create_name = route_customizations['create']['ui']['route_name']
     except KeyError:
         create_name = 'create'
 
     try:
-        read_name = route_customizations['read.ui']['route_name']
+        read_name = route_customizations['read']['ui']['route_name']
     except KeyError:
         read_name = 'read'
 
     try:
-        update_name = route_customizations['update.ui']['route_name']
+        update_name = route_customizations['update']['ui']['route_name']
     except KeyError:
         update_name = 'update'
 
     try:
-        delete_name = route_customizations['delete.ui']['route_name']
+        delete_name = route_customizations['delete']['ui']['route_name']
     except KeyError:
         delete_name = 'delete'
 
@@ -131,8 +142,6 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
     if route_map is not None:
         route_map.update(route_map)
 
-    # TODO: default route customisation so we don't have to type them out each time
-
     # We explicitly set the routes below so that they apply any overrides that may have been specified. They don't need
     # to be set is you are instantiating the StandardFormHandler class directly
     return [
@@ -148,10 +157,7 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
                     u'create.success': route_map[u'create.success'],
                 }
             },
-            'route_customizations': {
-                'create.ui': route_customizations.get('create.ui', None),
-                'create.action': route_customizations.get('create.action', None),
-            }
+            'route_customizations': route_customizations.get('create', {})
         },
         {
             'type': StandardFormHandler,
@@ -161,14 +167,9 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
                 'handler_code_name': read_name,
                 'route_map': {
                     u'read.ui': route_map[u'read.ui'],
-                    u'read.action': route_map[u'read.action'],
-                    u'read.success': route_map[u'read.success'],
                 }
             },
-            'route_customizations': {
-                'read.ui': route_customizations.get('read.ui', None),
-                'read.action': route_customizations.get('read.action', None),
-            }
+            'route_customizations': route_customizations.get('read', {})
         },
         {
             'type': StandardFormHandler,
@@ -182,10 +183,7 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
                     u'update.success': route_map[u'update.success'],
                 }
             },
-            'route_customizations': {
-                'update.ui': route_customizations.get('update.ui', None),
-                'update.action': route_customizations.get('update.action', None),
-            }
+            'route_customizations': route_customizations.get('update', {})
         },
         {
             'type': StandardFormHandler,
@@ -199,10 +197,7 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
                     u'delete.success': route_map[u'delete.success'],
                 }
             },
-            'route_customizations': {
-                'delete.ui': route_customizations.get('delete.ui', None),
-                'delete.action': route_customizations.get('delete.action', None),
-            }
+            'route_customizations': route_customizations.get('delete', {})
         },
     ]
 
