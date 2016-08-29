@@ -19,7 +19,7 @@
 import unittest
 from google.appengine.ext import testbed
 from blinker import signal
-from jerboa.extra import crud_handler_definition_generator, StandardFormHandler, SearchHandler, parse_component_config
+from jerboa.extra import crud_handler_definition_generator, StandardFormHandler, SearchHandler, parse_component_config, AppRegistry
 
 __author__ = 'Matt Badger'
 
@@ -56,7 +56,7 @@ test_handler_config = {
                     'handler_code_name': 'search',
                 },
                 'route_customizations': {
-                    'search': {
+                    'ui': {
                         'page_template': 'extra/search.html'
                     },
                 },
@@ -139,6 +139,37 @@ class TestComponentConfigParser(unittest.TestCase):
         self.testbed.deactivate()
 
     def test_config_parser(self):
-        # TODO: test that a component is created, handlers are setup, and routes added to the component using the
-        # created handlers
-        pass
+        AppRegistry.reset()
+        parse_component_config(component_config=test_handler_config)
+        self.assertEqual(len(AppRegistry.components), 1, 'Invalid number of components')
+        self.assertEqual(len(AppRegistry.handlers), 1, 'Invalid number of handlers')
+        self.assertEqual(len(AppRegistry.components['user'].get_routes()), 1, 'Invalid number of component routes')
+
+    def test_config_parser_with_crud_generator_output(self):
+        AppRegistry.reset()
+        read_route_config = {
+            'ui': {
+                'route_name': 'profile',
+                'route_title': 'User Account',
+                'page_template': 'extra/read.html'
+            },
+            'action': {
+                'route_name': 'profile',
+            },
+
+        }
+        user_crud_handlers = crud_handler_definition_generator(component_name='user',
+                                                               route_customizations={
+                                                                   'read': read_route_config,
+                                                               })
+        crud_handler_config = {
+            'user': {
+                'title': 'User',
+                'handler_definitions': user_crud_handlers
+            }
+        }
+
+        parse_component_config(component_config=crud_handler_config)
+        self.assertEqual(len(AppRegistry.components), 1, 'Invalid number of components')
+        self.assertEqual(len(AppRegistry.handlers), 4, 'Invalid number of handlers')
+        self.assertEqual(len(AppRegistry.components['user'].raw_routes_prefix), 7, 'Invalid number of component routes')

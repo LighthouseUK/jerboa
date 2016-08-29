@@ -16,6 +16,11 @@ class AppRegistry(object):
     components = {}
     handlers = {}
 
+    @classmethod
+    def reset(cls):
+        cls.components = {}
+        cls.handlers = {}
+
 
 def parse_component_config(component_config):
     for component, config in component_config.iteritems():
@@ -24,7 +29,7 @@ def parse_component_config(component_config):
         for handler_definition in config['handler_definitions']:
             code_name = handler_definition['config']['handler_code_name']
             handler_name = '{}_{}'.format(component, code_name)
-            AppRegistry.handlers[handler_name] = handler_definition['type'](handler_definition['config'])
+            AppRegistry.handlers[handler_name] = handler_definition['type'](handler_title=config['title'], **handler_definition['config'])
 
             title = u'{} {}'.format(code_name.title(), config['title']) if config.get('title', False) else code_name.title()
 
@@ -35,41 +40,50 @@ def parse_component_config(component_config):
                 'handler': AppRegistry.handlers[handler_name].ui_handler,
                 'page_template': 'extra/{}.html'.format(code_name),
             }
-            action_default_config = {
-                'route_type': 'action',
-                'route_name': code_name,
-                'handler': AppRegistry.handlers[handler_name].action_handler,
-            }
-            if type(handler_definition['type']) is StandardFormHandler:
+            if handler_definition['type'] is StandardFormHandler:
+                callback_default_config = {
+                    'route_type': 'action',
+                    'route_name': code_name,
+                    'handler': AppRegistry.handlers[handler_name].callback_handler,
+                }
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
-                    action_default_config.update(handler_definition['config']['route_customization'].get('action', {}))
+                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
+                    callback_default_config.update(handler_definition['route_customizations'].get('action', {}))
                 except KeyError:
                     pass
 
                 AppRegistry.components[component].add_route(**ui_default_config)
-                AppRegistry.components[component].add_route(**action_default_config)
-            elif type(handler_definition['type']) is SearchHandler:
+                AppRegistry.components[component].add_route(**callback_default_config)
+            elif handler_definition['type'] is StandardUIHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
+                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
                 except KeyError:
                     pass
 
                 AppRegistry.components[component].add_route(**ui_default_config)
-            elif type(handler_definition['type']) is HeadlessSearchHandler:
+            elif handler_definition['type'] is SearchHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
+                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
                 except KeyError:
                     pass
 
                 AppRegistry.components[component].add_route(**ui_default_config)
-            elif type(handler_definition['type']) is AutoSearchHandler:
+            elif handler_definition['type'] is HeadlessSearchHandler:
                 try:
-                    ui_default_config.update(handler_definition['config']['route_customization'].get('ui', {}))
+                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
                 except KeyError:
                     pass
 
                 AppRegistry.components[component].add_route(**ui_default_config)
+            elif handler_definition['type'] is AutoSearchHandler:
+                try:
+                    ui_default_config.update(handler_definition['route_customization'].get('ui', {}))
+                except KeyError:
+                    pass
+
+                AppRegistry.components[component].add_route(**ui_default_config)
+            else:
+                raise ValueError('Unknown handler type')
 
 
 def crud_handler_definition_generator(component_name, form=PlaceholderForm, delete_form=DeleteModelForm, route_customizations=None, route_map=None):
@@ -160,7 +174,7 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
             'route_customizations': route_customizations.get('create', {})
         },
         {
-            'type': StandardFormHandler,
+            'type': StandardUIHandler,
             'config': {
                 'form': form,
                 'component_name': component_name,
@@ -373,6 +387,56 @@ def default_form_csrf_config(sender, request, response, form_config):
 def default_form_recaptcha_config(sender, request, response, form_config):
     form_config['recaptcha_site_key'] = request.secrets.get('recaptcha_site_key')
     form_config['recaptcha_site_secret'] = request.secrets.get('recaptcha_site_secret')
+
+
+class StandardUIHandler(BaseHandlerMixin):
+    UI_HOOK = 'ui'
+
+    def __init__(self, route_map=None, **kwargs):
+        super(StandardUIHandler, self).__init__(**kwargs)
+        # Default mapping for handlers. These can be overridden but by default it will redirect back to the ui handler
+        # upon success, with a success status code in the query string
+        ui_name = u'{}.ui'.format(self.handler_name)
+
+        default_route_map = {
+            ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
+        }
+
+        self.ui_name = ui_name
+
+        if route_map:
+            default_route_map.update(route_map)
+
+        self._route_map.update(default_route_map)
+
+        self.generic_failure_status_code = self.status_manager.add_status(
+            message='There was a problem processing your request.', status_type='alert')
+
+        self._ui_hook = signal(self.UI_HOOK)
+
+    @property
+    def _ui_hook_enabled(self):
+        return bool(self._ui_hook.receivers)
+
+    def ui_handler(self, request, response):
+        """
+        Very simple UI handler. Use `_ui_hook` to modify the response as necessary. Raise ClientError or UIFailed to
+        interrupt the UI render and redirect to the default route. You may also set a custom redirect by setting
+        `response.redirect_to` before raising the aforementioned exceptions.
+
+        :param request:
+        :param response:
+        :return:
+        """
+        self.parse_status_code(request=request, response=response)
+        self.set_redirect_url(request=request, response=response, route_name=self.default_route,
+                              status_code=self.generic_failure_status_code)
+        try:
+            if self._ui_hook_enabled:
+                self._ui_hook.send(self, request=request, response=response)
+        except (ClientError, UIFailed), e:
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
+            self._initiate_redirect(request, response)
 
 
 class StandardFormHandler(BaseFormHandler):
@@ -644,7 +708,7 @@ class SearchHandler(BaseFormHandler):
     def _callback_failed_hook_enabled(self):
         return bool(self._callback_failed_hook.receivers)
 
-    def search_ui(self, request, response):
+    def ui_handler(self, request, response):
         try:
             if self._ui_hook_enabled:
                 self._ui_hook.send(self, request=request, response=response)
@@ -724,7 +788,7 @@ class HeadlessSearchHandler(SearchHandler):
     This is almost exactly the same as the standard SearchHandler. The only difference is the way the form validation
     is handled. You should use the same hooks for performing searches and modifying the UI as the standard handler.
     """
-    def search_ui(self, request, response):
+    def ui_handler(self, request, response):
         try:
             if self._ui_hook_enabled:
                 self._ui_hook.send(self, request=request, response=response)
@@ -776,7 +840,7 @@ class AutoSearchHandler(SearchHandler):
     This is almost exactly the same as the standard SearchHandler. The only difference is the lack of form validation.
     You should use the same hooks for performing searches and modifying the UI as the standard handler.
     """
-    def search_ui(self, request, response):
+    def ui_handler(self, request, response):
         try:
             if self._ui_hook_enabled:
                 self._ui_hook.send(self, request=request, response=response)
