@@ -11,6 +11,6 @@ setup(
     download_url='https://github.com/LighthouseUK/jerboa/tarball/0.1.5-alpha',  # I'll explain this in a second
     keywords=['gae', 'lighthouse', 'jerboa', 'webapp2'],  # arbitrary keywords
     classifiers=[],
-    requires=['webapp2', 'blinker', 'inflection', 'wtforms', 'webob', 'jinja2', 'pytz', 'babel'],
-    # test_require=['mock']
+    requires=['webapp2', 'blinker', 'wtforms', 'jinja2', 'pytz', 'babel'],
+    # tests_require=['WebTest']
 )
