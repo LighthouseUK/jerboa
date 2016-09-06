@@ -559,7 +559,7 @@ class StandardFormHandler(BaseFormHandler):
         """
         try:
             if self._ui_hook_enabled:
-                self.ui_hook.send(self, request=request, response=response)
+                self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name=self.default_route,
@@ -634,7 +634,7 @@ class StandardFormHandler(BaseFormHandler):
 
                 if self._duplicate_value_hook_enabled:
                     self.duplicate_value_hook.send(self, request=request, response=response, form_instance=form_instance, duplicates=e.duplicates, hook_name=self.DUPLICATE_VALUE_HOOK_NAME)
-            except UIFailed, e:
+            except CallbackFailed, e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
                 self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
@@ -671,6 +671,7 @@ class SearchHandler(BaseFormHandler):
     VALID_FORM_HOOK_NAME = 'valid_form'
     FORM_ERROR_HOOK_NAME = 'form_error'
     CALLBACK_FAILED_HOOK_NAME = 'callback_failed'
+    UI_FAILED_HOOK_NAME = 'ui_failed'
 
     def __init__(self, search_properties_to_display=None, form=BaseSearchForm, search_handler_map=None,
                  view_full_result_route=None, keep_blank_values=0, force_empty_query=False, **kwargs):
@@ -701,6 +702,7 @@ class SearchHandler(BaseFormHandler):
         self.valid_form_hook = signal(self.VALID_FORM_HOOK_NAME)
         self.form_error_hook = signal(self.FORM_ERROR_HOOK_NAME)
         self.callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK_NAME)
+        self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
 
     @property
     def _ui_hook_enabled(self):
@@ -730,14 +732,22 @@ class SearchHandler(BaseFormHandler):
     def _callback_failed_hook_enabled(self):
         return bool(self.callback_failed_hook.receivers)
 
+    @property
+    def _ui_failed_hook_enabled(self):
+        return bool(self.ui_failed_hook.receivers)
+
     def ui_handler(self, request, response):
         try:
             if self._ui_hook_enabled:
-                self.ui_hook.send(self, request=request, response=response)
+                self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name=self.default_route,
                                   status_code=self.generic_failure_status_code)
+
+            if self._ui_failed_hook_enabled:
+                self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
+
             self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
@@ -745,12 +755,12 @@ class SearchHandler(BaseFormHandler):
             form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET, method='GET')
 
             if self._form_config_hook_enabled:
-                self.form_config_hook.send(self, request=request, response=response, form_config=form_config)
+                self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
 
             form_instance = self.form(**form_config)
 
             if self._customize_form_hook_enabled:
-                self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CUSTOMIZE_FORM_HOOK_NAME)
 
             response.raw.form = form_instance
 
@@ -759,23 +769,23 @@ class SearchHandler(BaseFormHandler):
                 if form_instance.validate():
                     try:
                         if self._valid_form_hook_enabled:
-                            self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                            self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.VALID_FORM_HOOK_NAME)
                     except (CallbackFailed, UIFailed), e:
                         self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
                         if self._callback_failed_hook_enabled:
-                            self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance)
+                            self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CALLBACK_FAILED_HOOK_NAME)
 
                         self._initiate_redirect(request, response)
                     else:
                         if self._results_ui_hook_enabled:
-                            self.results_ui_hook.send(self, request=request, response=response, form_instance=form_instance)
+                            self.results_ui_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.RESULTS_UI_HOOK_NAME)
 
                 elif not response.raw.status_code:
                     self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
                     if self._form_error_hook_enabled:
-                        self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
+                        self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.FORM_ERROR_HOOK_NAME)
 
                     self._initiate_redirect(request, response)
 
@@ -813,11 +823,15 @@ class HeadlessSearchHandler(SearchHandler):
     def ui_handler(self, request, response):
         try:
             if self._ui_hook_enabled:
-                self.ui_hook.send(self, request=request, response=response)
+                self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name=self.default_route,
                                   status_code=self.generic_failure_status_code)
+
+            if self._ui_failed_hook_enabled:
+                self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
+
             self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
@@ -825,12 +839,12 @@ class HeadlessSearchHandler(SearchHandler):
             form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET, method='GET')
 
             if self._form_config_hook_enabled:
-                self.form_config_hook.send(self, request=request, response=response, form_config=form_config)
+                self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
 
             form_instance = self.form(**form_config)
 
             if self._customize_form_hook_enabled:
-                self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CUSTOMIZE_FORM_HOOK_NAME)
 
             response.raw.form = form_instance
 
@@ -838,23 +852,23 @@ class HeadlessSearchHandler(SearchHandler):
                 self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
                 if self._form_error_hook_enabled:
-                    self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.FORM_ERROR_HOOK_NAME)
 
                 self._initiate_redirect(request, response)
 
             try:
                 if self._valid_form_hook_enabled:
-                    self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.VALID_FORM_HOOK_NAME)
             except (CallbackFailed, UIFailed), e:
                 self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
                 if self._callback_failed_hook_enabled:
-                    self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CALLBACK_FAILED_HOOK_NAME)
 
                 self._initiate_redirect(request, response)
             else:
                 if self._results_ui_hook_enabled:
-                    self.results_ui_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    self.results_ui_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.RESULTS_UI_HOOK_NAME)
 
 
 class AutoSearchHandler(SearchHandler):
@@ -865,25 +879,29 @@ class AutoSearchHandler(SearchHandler):
     def ui_handler(self, request, response):
         try:
             if self._ui_hook_enabled:
-                self.ui_hook.send(self, request=request, response=response)
+                self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name=self.default_route,
                                   status_code=self.generic_failure_status_code)
+
+            if self._ui_failed_hook_enabled:
+                self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
+
             self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
 
             try:
                 if self._valid_form_hook_enabled:
-                    self.valid_form_hook.send(self, request=request, response=response, form_instance=None)
+                    self.valid_form_hook.send(self, request=request, response=response, form_instance=None, hook_name=self.VALID_FORM_HOOK_NAME)
             except (CallbackFailed, UIFailed), e:
                 self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
 
                 if self._callback_failed_hook_enabled:
-                    self.callback_failed_hook.send(self, request=request, response=response, form_instance=None)
+                    self.callback_failed_hook.send(self, request=request, response=response, form_instance=None, hook_name=self.CALLBACK_FAILED_HOOK_NAME)
 
                 self._initiate_redirect(request, response)
             else:
                 if self._results_ui_hook_enabled:
-                    self.results_ui_hook.send(self, request=request, response=response, form_instance=None)
+                    self.results_ui_hook.send(self, request=request, response=response, form_instance=None, hook_name=self.RESULTS_UI_HOOK_NAME)
