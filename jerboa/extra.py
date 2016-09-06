@@ -121,6 +121,8 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
     :return:
     """
     # Generate handler definitions for each crud route to avoid having to type them out in full each time
+    if route_customizations is None:
+        route_customizations = {}
 
     try:
         create_name = route_customizations['create']['ui']['route_name']
@@ -391,6 +393,7 @@ def default_form_recaptcha_config(sender, request, response, form_config):
 
 class StandardUIHandler(BaseHandlerMixin):
     UI_HOOK_NAME = 'ui'
+    UI_FAILED_HOOK_NAME = 'ui_failed'
 
     def __init__(self, route_map=None, **kwargs):
         super(StandardUIHandler, self).__init__(**kwargs)
@@ -413,10 +416,15 @@ class StandardUIHandler(BaseHandlerMixin):
             message='There was a problem processing your request.', status_type='alert')
 
         self.ui_hook = signal(self.UI_HOOK_NAME)
+        self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
 
     @property
     def _ui_hook_enabled(self):
         return bool(self.ui_hook.receivers)
+
+    @property
+    def _ui_failed_hook_enabled(self):
+        return bool(self.ui_failed_hook.receivers)
 
     def ui_handler(self, request, response):
         """
@@ -436,6 +444,10 @@ class StandardUIHandler(BaseHandlerMixin):
                 self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
+
+            if self._ui_failed_hook_enabled:
+                self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
+
             self._initiate_redirect(request, response)
 
 
@@ -445,8 +457,9 @@ class StandardFormHandler(BaseFormHandler):
     CUSTOMIZE_FORM_HOOK_NAME = 'customize_form'
     VALID_FORM_HOOK_NAME = 'valid_form'
     FORM_ERROR_HOOK_NAME = 'form_error'
+    DUPLICATE_VALUE_HOOK_NAME = 'duplicate_value'
     CALLBACK_FAILED_HOOK_NAME = 'callback_failed'
-    DUPLICATE_VALUE_HOOK_NAME = 'duplicate_values'
+    UI_FAILED_HOOK_NAME = 'ui_failed'
 
     def __init__(self, form=PlaceholderForm, route_map=None, success_message=None,
                  failure_message=None, suppress_success_status=False, force_ui_get_data=False,
@@ -491,8 +504,9 @@ class StandardFormHandler(BaseFormHandler):
         self.customize_form_hook = signal(self.CUSTOMIZE_FORM_HOOK_NAME)
         self.valid_form_hook = signal(self.VALID_FORM_HOOK_NAME)
         self.form_error_hook = signal(self.FORM_ERROR_HOOK_NAME)
-        self.callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK_NAME)
         self.duplicate_value_hook = signal(self.DUPLICATE_VALUE_HOOK_NAME)
+        self.callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK_NAME)
+        self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
 
     @property
     def _ui_hook_enabled(self):
@@ -522,6 +536,10 @@ class StandardFormHandler(BaseFormHandler):
     def _callback_failed_hook_enabled(self):
         return bool(self.callback_failed_hook.receivers)
 
+    @property
+    def _ui_failed_hook_enabled(self):
+        return bool(self.ui_failed_hook.receivers)
+
     def ui_handler(self, request, response):
         """
         You must set `form` in the handler config. This should be the class definition and not an instance of the form.
@@ -546,6 +564,10 @@ class StandardFormHandler(BaseFormHandler):
             logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
             self.set_redirect_url(request=request, response=response, route_name=self.default_route,
                                   status_code=self.generic_failure_status_code)
+
+            if self._ui_failed_hook_enabled:
+                self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
+
             self._initiate_redirect(request, response)
         else:
             self.parse_status_code(request=request, response=response)
@@ -555,12 +577,12 @@ class StandardFormHandler(BaseFormHandler):
             form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.callback_name), formdata=formdata)
 
             if self._form_config_hook_enabled:
-                self.form_config_hook.send(self, request=request, response=response, form_config=form_config)
+                self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
 
             form_instance = self.form(**form_config)
 
             if self._customize_form_hook_enabled:
-                self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CUSTOMIZE_FORM_HOOK_NAME)
 
             response.raw.form = form_instance
 
@@ -591,19 +613,19 @@ class StandardFormHandler(BaseFormHandler):
         form_config = self._build_form_config(request=request)
 
         if self._form_config_hook_enabled:
-            self.form_config_hook.send(self, request=request, response=response, form_config=form_config)
+            self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
 
         form_instance = self.form(**form_config)
 
         if self._customize_form_hook_enabled:
-            self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+            self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CUSTOMIZE_FORM_HOOK_NAME)
 
         if form_instance.validate():
             self.set_redirect_url(request=request, response=response, route_name=self.success_name,
                                   status_code=self.success_status_code, follow_continue=True)
             try:
                 if self._valid_form_hook_enabled:
-                    self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.VALID_FORM_HOOK_NAME)
             except FormDuplicateValue, e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
 
@@ -611,22 +633,22 @@ class StandardFormHandler(BaseFormHandler):
                                       status_code=self.failure_status_code, duplicates=e.duplicates, **filtered_params)
 
                 if self._duplicate_value_hook_enabled:
-                    self.duplicate_value_hook.send(self, request=request, response=response, form_instance=form_instance, duplicates=e.duplicates)
-            except (CallbackFailed, UIFailed), e:
+                    self.duplicate_value_hook.send(self, request=request, response=response, form_instance=form_instance, duplicates=e.duplicates, hook_name=self.DUPLICATE_VALUE_HOOK_NAME)
+            except UIFailed, e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
                 self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
                                       status_code=self.failure_status_code, **filtered_params)
 
                 if self._callback_failed_hook_enabled:
-                    self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance)
+                    self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CALLBACK_FAILED_HOOK_NAME)
 
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
             self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
                                   status_code=self.failure_status_code, **filtered_params)
             if self._form_error_hook_enabled:
-                self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance)
+                self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.FORM_ERROR_HOOK_NAME)
 
         self._initiate_redirect(request, response)
 

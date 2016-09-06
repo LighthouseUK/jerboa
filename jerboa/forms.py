@@ -672,9 +672,16 @@ class BaseModelForm(BaseForm, BaseModelMixin):
 
 
 class PlaceholderForm(BaseForm):
-    placeholder = wtforms.fields.StringField(label=i18n.lazy_gettext('Placeholder'),
-                                             default='Example Input',
-                                             validators=[wtforms.validators.InputRequired()])
+    """
+    We remove the CSRF protection from the placeholder form; chances are if you are using it then you don't have
+    a session mechanism setup, meaning there would be nowhere to save the csrf token for verification.
+    """
+    class Meta:
+        csrf = False
+
+    required_input = wtforms.fields.StringField(label=i18n.lazy_gettext('Required Input'),
+                                                default='Here is some text',
+                                                validators=[wtforms.validators.InputRequired()])
 
 
 class LoginForm(BaseForm, AuthIDMixin, PasswordMixin):

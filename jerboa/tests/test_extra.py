@@ -22,7 +22,9 @@ import webapp2
 from webapp2 import Route
 from webapp2_extras.routes import MultiRoute
 from blinker import signal
-from jerboa.dispatcher import custom_dispatcher, custom_adapter
+from jerboa.exceptions import FormDuplicateValue, UIFailed, CallbackFailed
+from jerboa.renderers import retrofit_response
+from jerboa.dispatcher import custom_dispatcher, custom_adapter, CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK
 from jerboa.extra import crud_handler_definition_generator, StandardFormHandler, SearchHandler, parse_component_config, AppRegistry, StandardUIHandler
 
 __author__ = 'Matt Badger'
@@ -206,7 +208,7 @@ def add_routes(app_instance, route_list):
             add_routes(app_instance=app_instance, route_list=item)
 
 
-class TestHandlerHooks(unittest.TestCase):
+class TestUIHandlerHooks(unittest.TestCase):
     def setUp(self):
         AppRegistry.reset()
         parse_component_config(component_config=test_handler_config)
@@ -239,15 +241,59 @@ class TestHandlerHooks(unittest.TestCase):
         self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
         self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1, u'Handler should trigger `ui` hook 1 time(s)')
 
-    def test_form_ui(self):
-        UI_HOOK = 'ui'
-
+    def test_ui_failure(self):
         handler = AppRegistry.handlers['home_dashboard']
         signal_tester = SignalTester()
-        # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.ui_failed_hook.connect(signal_tester.hook_subscriber, sender=handler)
+
+        # In order to test this hook we need to raise an exception. To do that we need to connect to the ui hook
+        def raise_ui_failed_exception(sender, **kwargs):
+            raise UIFailed('Testing ui failed exception hook')
+
+        handler.ui_hook.connect(raise_ui_failed_exception, sender=handler)
 
         request = webapp2.Request.blank('/home/dashboard')
+        response = request.get_response(self.app)
+
+        self.assertEqual(response.status_int, 302)   # The exception should trigger a redirect
+        self.assertEquals(signal_tester.hook_activations[handler]['ui_failed'], 1,
+                          u'Handler should trigger `ui_failed` hook 1 time(s)')
+
+
+class TestFormHandlerHooks(unittest.TestCase):
+    def setUp(self):
+        AppRegistry.reset()
+        user_crud_handlers = crud_handler_definition_generator(component_name='user')
+        crud_handler_config = {
+            'user': {
+                'title': 'User',
+                'handler_definitions': user_crud_handlers
+            }
+        }
+        parse_component_config(component_config=crud_handler_config)
+
+        routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
+
+        app = webapp2.WSGIApplication(debug=True)
+        app.router.set_dispatcher(custom_dispatcher)
+        app.router.set_adapter(custom_adapter)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
+
+        add_routes(app_instance=app, route_list=routes)
+        self.app = app
+
+        self.testbed = testbed.Testbed()
+        self.testbed.activate()
+
+    def tearDown(self):
+        self.testbed.deactivate()
+
+    def test_form_ui(self):
+        handler = AppRegistry.handlers['user_create']
+        signal_tester = SignalTester()
+        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+
+        request = webapp2.Request.blank('/user/create')
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 200)
@@ -256,116 +302,126 @@ class TestHandlerHooks(unittest.TestCase):
                           u'Handler should trigger `ui` hook 1 time(s)')
 
     def test_form_config(self):
-        FORM_CONFIG_HOOK = 'form_config'
-
-        handler = AppRegistry.handlers['home_dashboard']
+        handler = AppRegistry.handlers['user_create']
         signal_tester = SignalTester()
-        # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.form_config_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/home/dashboard')
+        request = webapp2.Request.blank('/user/create')
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 200)
         self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
-        self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1,
-                          u'Handler should trigger `ui` hook 1 time(s)')
+        self.assertEquals(signal_tester.hook_activations[handler]['form_config'], 1,
+                          u'Handler should trigger `form_config` hook 1 time(s)')
 
     def test_form_customization(self):
-        CUSTOMIZE_FORM_HOOK = 'customize_form'
-
-        handler = AppRegistry.handlers['home_dashboard']
+        handler = AppRegistry.handlers['user_create']
         signal_tester = SignalTester()
-        # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.customize_form_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/home/dashboard')
+        request = webapp2.Request.blank('/user/create')
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 200)
         self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
-        self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1,
-                          u'Handler should trigger `ui` hook 1 time(s)')
+        self.assertEquals(signal_tester.hook_activations[handler]['customize_form'], 1,
+                          u'Handler should trigger `customize_form` hook 1 time(s)')
 
     def test_form_valid(self):
-        VALID_FORM_HOOK = 'valid_form'
-
-        handler = AppRegistry.handlers['home_dashboard']
+        handler = AppRegistry.handlers['user_create']
         signal_tester = SignalTester()
         # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.valid_form_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/home/dashboard')
+        request = webapp2.Request.blank('/user/create/callback', POST={'required_input': 'Test Input'})
         response = request.get_response(self.app)
 
-        self.assertEqual(response.status_int, 200)
+        self.assertEqual(response.status_int, 302)
         self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
-        self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1,
-                          u'Handler should trigger `ui` hook 1 time(s)')
+        self.assertEquals(signal_tester.hook_activations[handler]['valid_form'], 1,
+                          u'Handler should trigger `valid_form` hook 1 time(s)')
 
     def test_form_error(self):
-        FORM_ERROR_HOOK = 'form_error'
-
-        handler = AppRegistry.handlers['home_dashboard']
+        handler = AppRegistry.handlers['user_create']
         signal_tester = SignalTester()
-        # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.form_error_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/home/dashboard')
+        request = webapp2.Request.blank('/user/create/callback')
         response = request.get_response(self.app)
 
-        self.assertEqual(response.status_int, 200)
+        self.assertEqual(response.status_int, 302)
         self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
-        self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1,
-                          u'Handler should trigger `ui` hook 1 time(s)')
+        self.assertEquals(signal_tester.hook_activations[handler]['form_error'], 1,
+                          u'Handler should trigger `form_error` hook 1 time(s)')
 
     def test_form_duplicate_values(self):
-        DUPLICATE_VALUE_HOOK = 'duplicate_values'
-
-        handler = AppRegistry.handlers['home_dashboard']
+        handler = AppRegistry.handlers['user_create']
         signal_tester = SignalTester()
-        # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.duplicate_value_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/home/dashboard')
+        # In order to test this hook we need to raise an exception. To do that we need to connect to the valid_form hook
+        def raise_duplicate_value_exception(sender, **kwargs):
+            raise FormDuplicateValue('Testing duplicate value exception hook')
+        handler.valid_form_hook.connect(raise_duplicate_value_exception, sender=handler)
+
+        request = webapp2.Request.blank('/user/create/callback', POST={'required_input': 'Test Input'})
         response = request.get_response(self.app)
 
-        self.assertEqual(response.status_int, 200)
-        self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
-        self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1,
-                          u'Handler should trigger `ui` hook 1 time(s)')
+        self.assertEqual(response.status_int, 302)
+        self.assertEquals(signal_tester.hook_activations[handler]['duplicate_value'], 1,
+                          u'Handler should trigger `duplicate_value` hook 1 time(s)')
 
     def test_form_callback_failure(self):
-        CALLBACK_FAILED_HOOK = 'callback_failed'
-
-        handler = AppRegistry.handlers['home_dashboard']
+        handler = AppRegistry.handlers['user_create']
         signal_tester = SignalTester()
-        # Subscribe to signals
-        handler.ui_hook.connect(signal_tester.hook_subscriber, sender=handler)
+        handler.callback_failed_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/home/dashboard')
+        # In order to test this hook we need to raise an exception. To do that we need to connect to the valid_form hook
+        def raise_callback_failed_exception(sender, **kwargs):
+            raise CallbackFailed('Testing callback failed exception hook')
+
+        handler.valid_form_hook.connect(raise_callback_failed_exception, sender=handler)
+
+        request = webapp2.Request.blank('/user/create', POST={'required_input': 'Test Input'})
         response = request.get_response(self.app)
 
-        self.assertEqual(response.status_int, 200)
-        self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
-        self.assertEquals(signal_tester.hook_activations[handler]['ui'], 1,
-                          u'Handler should trigger `ui` hook 1 time(s)')
+        self.assertEqual(response.status_int, 302)
+        self.assertEquals(signal_tester.hook_activations[handler]['callback_failed'], 1,
+                          u'Handler should trigger `callback_failed` hook 1 time(s)')
 
-    def test_search_handler(self):
-        UI_HOOK = 'ui'
-        RESULTS_UI_HOOK = 'results_ui'
-        FORM_CONFIG_HOOK = 'form_config'
-        CUSTOMIZE_FORM_HOOK = 'customize_form'
-        VALID_FORM_HOOK = 'valid_form'
-        FORM_ERROR_HOOK = 'form_error'
-        CALLBACK_FAILED_HOOK = 'callback_failed'
-        self.assertTrue(self.app)
-        pass
+    def test_form_ui_failure(self):
+        handler = AppRegistry.handlers['user_create']
+        signal_tester = SignalTester()
+        handler.ui_failed_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-    def test_headless_search_handler(self):
-        self.assertTrue(self.app)
-        pass
+        # In order to test this hook we need to raise an exception. To do that we need to connect to the ui hook
+        def raise_ui_failed_exception(sender, **kwargs):
+            raise UIFailed('Testing ui failed exception hook')
 
-    def test_auto_search_handler(self):
-        self.assertTrue(self.app)
-        pass
+        handler.ui_hook.connect(raise_ui_failed_exception, sender=handler)
+
+        request = webapp2.Request.blank('/user/create')
+        response = request.get_response(self.app)
+
+        self.assertEqual(response.status_int, 302)
+        self.assertEquals(signal_tester.hook_activations[handler]['ui_failed'], 1,
+                          u'Handler should trigger `ui_failed` hook 1 time(s)')
+
+    # def test_search_handler(self):
+    #     UI_HOOK = 'ui'
+    #     RESULTS_UI_HOOK = 'results_ui'
+    #     FORM_CONFIG_HOOK = 'form_config'
+    #     CUSTOMIZE_FORM_HOOK = 'customize_form'
+    #     VALID_FORM_HOOK = 'valid_form'
+    #     FORM_ERROR_HOOK = 'form_error'
+    #     CALLBACK_FAILED_HOOK = 'callback_failed'
+    #     self.assertTrue(self.app)
+    #     pass
+    #
+    # def test_headless_search_handler(self):
+    #     self.assertTrue(self.app)
+    #     pass
+    #
+    # def test_auto_search_handler(self):
+    #     self.assertTrue(self.app)
+    #     pass
