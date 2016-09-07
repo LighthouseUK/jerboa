@@ -23,6 +23,7 @@ class AppRegistry(object):
 
 
 def parse_component_config(component_config):
+    # TODO: set the default content type to html, if not in config
     for component, config in component_config.iteritems():
         AppRegistry.components[component] = Component(name=component, title=config.get('title', None))
 
