@@ -60,25 +60,22 @@ class SignalTester(object):
 
 test_handler_config = {
     'home': {
-        'title': 'Home',
-        'handler_definitions': [
+        'method_definitions': [
             {
                 'type': StandardUIHandler,
                 'config': {
-                    'component_name': 'home',
-                    'handler_code_name': 'dashboard',
+                    'code_name': 'dashboard',
                 },
             },
         ]
     },
     'user': {
-        'title': 'User',
-        'handler_definitions': [
+        'method_definitions': [
             {
                 'type': SearchHandler,
                 'config': {
                     'component_name': 'user',
-                    'handler_code_name': 'search',
+                    'code_name': 'search',
                 },
                 'route_customizations': {
                     'ui': {
@@ -165,7 +162,7 @@ class TestComponentConfigParser(unittest.TestCase):
 
     def test_config_parser(self):
         AppRegistry.reset()
-        parse_component_config(component_config=test_handler_config)
+        parse_component_config(resource_config=test_handler_config)
         self.assertEqual(len(AppRegistry.components), 1, 'Invalid number of components')
         self.assertEqual(len(AppRegistry.handlers), 1, 'Invalid number of handlers')
         self.assertEqual(len(AppRegistry.components['user'].get_routes()), 1, 'Invalid number of component routes')
@@ -194,7 +191,7 @@ class TestComponentConfigParser(unittest.TestCase):
             }
         }
 
-        parse_component_config(component_config=crud_handler_config)
+        parse_component_config(resource_config=crud_handler_config)
         self.assertEqual(len(AppRegistry.components), 1, 'Invalid number of components')
         self.assertEqual(len(AppRegistry.handlers), 4, 'Invalid number of handlers')
         self.assertEqual(len(AppRegistry.components['user'].raw_routes_prefix), 7, 'Invalid number of component routes')
@@ -211,7 +208,7 @@ def add_routes(app_instance, route_list):
 class TestUIHandlerHooks(unittest.TestCase):
     def setUp(self):
         AppRegistry.reset()
-        parse_component_config(component_config=test_handler_config)
+        parse_component_config(resource_config=test_handler_config)
 
         routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
 
@@ -270,7 +267,7 @@ class TestFormHandlerHooks(unittest.TestCase):
                 'handler_definitions': user_crud_handlers
             }
         }
-        parse_component_config(component_config=crud_handler_config)
+        parse_component_config(resource_config=crud_handler_config)
 
         routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
 
@@ -411,7 +408,7 @@ class TestFormHandlerHooks(unittest.TestCase):
 class TestSearchFormHandlerHooks(unittest.TestCase):
     def setUp(self):
         AppRegistry.reset()
-        parse_component_config(component_config=test_handler_config)
+        parse_component_config(resource_config=test_handler_config)
 
         routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
 

@@ -13,78 +13,106 @@ __author__ = 'Matt'
 
 
 class AppRegistry(object):
-    components = {}
     handlers = {}
 
     @classmethod
     def reset(cls):
-        cls.components = {}
         cls.handlers = {}
 
 
-def parse_component_config(component_config):
+default_redirect_route_kwargs = {
+    'template': template,
+    'handler': None,
+    'name': None,
+    'defaults': None,
+    'build_only': False,
+    'handler_method': None,
+    'methods': None,
+    'schemes': None,
+    'redirect_to': None,
+    'redirect_to_name': None,
+    'strict_slash': True
+}
+
+default_method_definition = {
+    'method': {
+        'title': None,
+        'code_name': None,
+        'page_template': None,
+        'login_required': False,
+        'prefix_route': True,
+    },
+    'route': None,
+    'handler': {
+        'type': StandardUIHandler,
+    }
+}
+
+
+def parse_component_config(resource_config):
     # TODO: set the default content type to html, if not in config
-    for component, config in component_config.iteritems():
-        AppRegistry.components[component] = Component(name=component, title=config.get('title', None))
+    for resource, config in resource_config.iteritems():
 
-        for handler_definition in config['handler_definitions']:
-            code_name = handler_definition['config']['handler_code_name']
-            handler_name = '{}_{}'.format(component, code_name)
-            AppRegistry.handlers[handler_name] = handler_definition['type'](handler_title=config['title'], **handler_definition['config'])
+        for method_definition in config['method_definitions']:
+            handler_name = '{}_{}'.format(resource, method_definition['method']['code_name'])
 
-            title = u'{} {}'.format(code_name.title(), config['title']) if config.get('title', False) else code_name.title()
-
-            ui_default_config = {
-                'route_type': 'rendered',
-                'route_name': code_name,
-                'route_title': title,
-                'handler': AppRegistry.handlers[handler_name].ui_handler,
-                'page_template': 'extra/{}.html'.format(code_name),
+            # Parse the default method config
+            default_method_config = {
+                'title': None,
+                'code_name': None,
+                'page_template': None,
+                'login_required': False,
+                'prefix_route': True,
             }
-            if handler_definition['type'] is StandardFormHandler:
-                callback_default_config = {
-                    'route_type': 'action',
-                    'route_name': code_name,
-                    'handler': AppRegistry.handlers[handler_name].callback_handler,
-                }
-                try:
-                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
-                    callback_default_config.update(handler_definition['route_customizations'].get('action', {}))
-                except KeyError:
-                    pass
 
-                AppRegistry.components[component].add_route(**ui_default_config)
-                AppRegistry.components[component].add_route(**callback_default_config)
-            elif handler_definition['type'] is StandardUIHandler:
-                try:
-                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
-                except KeyError:
-                    pass
+            try:
+                default_method_config.update(method_definition['method'])
+            except KeyError:
+                pass
 
-                AppRegistry.components[component].add_route(**ui_default_config)
-            elif handler_definition['type'] is SearchHandler:
-                try:
-                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
-                except KeyError:
-                    pass
+            # Parse the default route config
+            default_route_config = {
+                'template': None,
+                'handler': None,
+                'name': None,
+                'defaults': None,
+                'build_only': False,
+                'handler_method': None,
+                'methods': None,
+                'schemes': None,
+                'redirect_to': None,
+                'redirect_to_name': None,
+                'strict_slash': True
+            }
 
-                AppRegistry.components[component].add_route(**ui_default_config)
-            elif handler_definition['type'] is HeadlessSearchHandler:
-                try:
-                    ui_default_config.update(handler_definition['route_customizations'].get('ui', {}))
-                except KeyError:
-                    pass
+            try:
+                default_route_config.update(method_definition['route'])
+            except KeyError:
+                pass
 
-                AppRegistry.components[component].add_route(**ui_default_config)
-            elif handler_definition['type'] is AutoSearchHandler:
-                try:
-                    ui_default_config.update(handler_definition['route_customization'].get('ui', {}))
-                except KeyError:
-                    pass
+            # TODO: delete template key and pass value as arg
+            # TODO: setup the route
 
-                AppRegistry.components[component].add_route(**ui_default_config)
-            else:
-                raise ValueError('Unknown handler type')
+            # Parse the default handler config
+            default_handler_config = {
+                'title': default_method_config['title'],
+                'code_name': handler_name,
+                'type': StandardUIHandler,
+                'success_route': None,
+                'failure_route': None,
+            }
+
+            try:
+                default_handler_config.update(method_definition['handler'])
+            except KeyError:
+                pass
+
+            handler_type = default_handler_config['type']
+            del default_handler_config['type']
+
+            AppRegistry.handlers[handler_name] = handler_type(**default_handler_config)
+
+            # TODO: connect the handler to the signals that are sent from the route
 
 
 def crud_handler_definition_generator(component_name, form=PlaceholderForm, delete_form=DeleteModelForm, route_customizations=None, route_map=None):
@@ -219,6 +247,15 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
     ]
 
 
+def default_route_signaler(request, response, **kwargs):
+    handler_hook_name = u'{}_{}'.format(request.route.name, request.method)
+    handler_signal = signal(handler_hook_name)
+
+    if bool(handler_signal.receivers):
+        # We send request as an arg to avoid having to use a separate 'sender', which would affect the method signatures
+        handler_signal.send(request, response=response, hook_name=handler_hook_name)
+
+
 class BaseHandlerMixin(object):
     """
     The route handling is a little complicated. We want the allow the routes to be configurable via the handler config.
@@ -240,17 +277,20 @@ class BaseHandlerMixin(object):
         passed to `set_redirect_url`
 
     """
-    def __init__(self, handler_code_name, handler_title, component_name, **kwargs):
-        self.component_name = component_name
-        self.handler_name = handler_code_name
-        self.handler_title = handler_title
-        self.default_route = u'app_default'
-        self._route_map = {
-            self.default_route: u'default',
-        }
-        self._full_url_map = {}
+    def __init__(self, code_name, title, success_route=None, failure_route=None, **kwargs):
+        self.code_name = code_name
+        self.title = title
         self._route_cache = {}
         self.status_manager = StatusManager
+
+        if success_route is None:
+            success_route = self.code_name
+
+        if failure_route is None:
+            failure_route = self.code_name
+
+        self.success_route = success_route
+        self.failure_route = failure_route
 
     @staticmethod
     def decode_unicode_uri_params(kwargs):
@@ -268,28 +308,22 @@ class BaseHandlerMixin(object):
         try:
             return self._route_cache[route_name]
         except KeyError:
-            try:
-                full_url = self._full_url_map[self._route_map[route_name]]
-            except KeyError:
-                route_url = self._route_map[route_name]
-                if not self.valid_url(route_url):
-                    # If the value is not a full url then we assume it is a webapp2 route name and try to build the url
-                    try:
-                        route_url = webapp2.uri_for(route_url)
-                    except KeyError:
-                        # By default, we will redirect to '/' unless `default` is explicitly set in the app. This
-                        # allows us to show friendly error messages instead of returning a http 500 error
-                        if route_name != 'default':
-                            raise
-                        else:
-                            route_url = '/'
-
-                self._full_url_map[self._route_map[route_name]] = route_url
-                self._route_cache[route_name] = route_url
-                return route_url
+            if not self.valid_url(route_name):
+                # If the value is not a full url then we assume it is a webapp2 route name and try to build the url
+                try:
+                    route_url = webapp2.uri_for(route_name)
+                except KeyError:
+                    # By default, we will redirect to '/' unless `default` is explicitly set in the app. This
+                    # allows us to show friendly error messages instead of returning a http 500 error
+                    if route_name != 'default':
+                        raise
+                    else:
+                        route_url = '/'
             else:
-                self._route_cache[route_name] = full_url
-                return full_url
+                route_url = route_name
+
+            self._route_cache[route_name] = route_url
+            return route_url
 
     def get_route_url(self, request, route_name, follow_continue=False, **kwargs):
         if request.GET.get('continue_url', False) and follow_continue:
@@ -335,16 +369,14 @@ class BaseFormHandler(BaseHandlerMixin):
         else:
             self.request_config_keys = request_config_keys
 
-        self.generic_success_status_code = self.status_manager.add_status(
-            message='Successfully completed operation on {}.'.format(self.handler_title), status_type='success')
-        self.generic_failure_status_code = self.status_manager.add_status(
-            message='Please correct the errors on the form below.', status_type='alert')
+        self.success_status_code = self.status_manager.DEFAULT_SUCCESS_CODE
+        self.failure_status_code = self.status_manager.DEFAULT_FORM_FAILURE_CODE
         self.key_required_status_code = self.status_manager.add_status(
-            message='You must supply a {} key.'.format(self.handler_title), status_type='alert')
+            message='You must supply a {} key.'.format(self.title), status_type='alert')
         self.key_invalid_status_code = self.status_manager.add_status(
-            message='You must supply a valid {} key.'.format(self.handler_title), status_type='alert')
+            message='You must supply a valid {} key.'.format(self.title), status_type='alert')
 
-        self.validation_trigger_codes = [self.generic_failure_status_code]
+        self.validation_trigger_codes = [self.failure_status_code]
         self.form = form
         self.form_method = form_method
 
@@ -396,25 +428,9 @@ class StandardUIHandler(BaseHandlerMixin):
     UI_HOOK_NAME = 'ui'
     UI_FAILED_HOOK_NAME = 'ui_failed'
 
-    def __init__(self, route_map=None, **kwargs):
+    def __init__(self, **kwargs):
         super(StandardUIHandler, self).__init__(**kwargs)
-        # Default mapping for handlers. These can be overridden but by default it will redirect back to the ui handler
-        # upon success, with a success status code in the query string
-        ui_name = u'{}.ui'.format(self.handler_name)
-
-        default_route_map = {
-            ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
-        }
-
-        self.ui_name = ui_name
-
-        if route_map:
-            default_route_map.update(route_map)
-
-        self._route_map.update(default_route_map)
-
-        self.generic_failure_status_code = self.status_manager.add_status(
-            message='There was a problem processing your request.', status_type='alert')
+        self.failure_status_code = self.status_manager.DEFAULT_FORM_FAILURE_CODE
 
         self.ui_hook = signal(self.UI_HOOK_NAME)
         self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
@@ -438,13 +454,13 @@ class StandardUIHandler(BaseHandlerMixin):
         :return:
         """
         self.parse_status_code(request=request, response=response)
-        self.set_redirect_url(request=request, response=response, route_name=self.default_route,
-                              status_code=self.generic_failure_status_code)
+        self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
+                              status_code=self.failure_status_code)
         try:
             if self._ui_hook_enabled:
                 self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
-            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.code_name))
 
             if self._ui_failed_hook_enabled:
                 self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
@@ -462,43 +478,24 @@ class StandardFormHandler(BaseFormHandler):
     CALLBACK_FAILED_HOOK_NAME = 'callback_failed'
     UI_FAILED_HOOK_NAME = 'ui_failed'
 
-    def __init__(self, form=PlaceholderForm, route_map=None, success_message=None,
-                 failure_message=None, suppress_success_status=False, force_ui_get_data=False,
-                 force_callback_get_data=False, **kwargs):
+    def __init__(self, form=PlaceholderForm, success_message=None, failure_message=None, suppress_success_status=False,
+                 force_ui_get_data=False, force_callback_get_data=False, **kwargs):
         super(StandardFormHandler, self).__init__(form=form, **kwargs)
 
-        # Default mapping for handlers. These can be overridden but by default it will redirect back to the ui handler
-        # upon success, with a success status code in the query string
-        ui_name = u'{}.ui'.format(self.handler_name)
-        callback_name = u'{}.action'.format(self.handler_name)
-        success_name = u'{}.success'.format(self.handler_name)
-
-        default_route_map = {
-            ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
-            callback_name: u'component.{}.{}.action'.format(self.component_name, self.handler_name),
-            success_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
-        }
-
-        self.ui_name = ui_name
-        self.callback_name = callback_name
-        self.success_name = success_name
         self.force_ui_get_data = force_ui_get_data
         self.force_callback_get_data = force_callback_get_data
 
-        if route_map:
-            default_route_map.update(route_map)
-
-        self._route_map.update(default_route_map)
-
         if not suppress_success_status and success_message:
             self.success_status_code = self.status_manager.add_status(message=success_message, status_type='success')
+        elif not suppress_success_status:
+            self.success_status_code = self.status_manager.DEFAULT_SUCCESS_CODE
         else:
             self.success_status_code = None
 
         if failure_message:
             self.failure_status_code = self.status_manager.add_status(message=failure_message, status_type='alert')
         else:
-            self.failure_status_code = self.generic_failure_status_code
+            self.failure_status_code = self.failure_status_code
 
         self.ui_hook = signal(self.UI_HOOK_NAME)
         self.form_config_hook = signal(self.FORM_CONFIG_HOOK_NAME)
@@ -562,9 +559,9 @@ class StandardFormHandler(BaseFormHandler):
             if self._ui_hook_enabled:
                 self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
-            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
-                                  status_code=self.generic_failure_status_code)
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.code_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
+                                  status_code=self.failure_status_code)
 
             if self._ui_failed_hook_enabled:
                 self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
@@ -575,7 +572,7 @@ class StandardFormHandler(BaseFormHandler):
             validate = response.raw.status_code in self.validation_trigger_codes
             formdata = request.GET if validate else None
 
-            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.callback_name), formdata=formdata)
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.code_name), formdata=formdata)
 
             if self._form_config_hook_enabled:
                 self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
@@ -622,7 +619,7 @@ class StandardFormHandler(BaseFormHandler):
             self.customize_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CUSTOMIZE_FORM_HOOK_NAME)
 
         if form_instance.validate():
-            self.set_redirect_url(request=request, response=response, route_name=self.success_name,
+            self.set_redirect_url(request=request, response=response, route_name=self.success_route,
                                   status_code=self.success_status_code, follow_continue=True)
             try:
                 if self._valid_form_hook_enabled:
@@ -630,7 +627,7 @@ class StandardFormHandler(BaseFormHandler):
             except FormDuplicateValue, e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
 
-                self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
+                self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
                                       status_code=self.failure_status_code, duplicates=e.duplicates, **filtered_params)
 
                 if self._duplicate_value_hook_enabled:
@@ -638,7 +635,7 @@ class StandardFormHandler(BaseFormHandler):
             except CallbackFailed, e:
                 filtered_params = self.filter_unwanted_params(request_params=request.params,
                                                               unwanted=self.filter_params)
-                self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
+                self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
                                       status_code=self.failure_status_code, **filtered_params)
 
                 if self._callback_failed_hook_enabled:
@@ -646,7 +643,7 @@ class StandardFormHandler(BaseFormHandler):
 
         else:
             filtered_params = self.filter_unwanted_params(request_params=request.params, unwanted=self.filter_params)
-            self.set_redirect_url(request=request, response=response, route_name=self.ui_name,
+            self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
                                   status_code=self.failure_status_code, **filtered_params)
             if self._form_error_hook_enabled:
                 self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.FORM_ERROR_HOOK_NAME)
@@ -674,20 +671,10 @@ class SearchHandler(BaseFormHandler):
     CALLBACK_FAILED_HOOK_NAME = 'callback_failed'
     UI_FAILED_HOOK_NAME = 'ui_failed'
 
-    def __init__(self, search_properties_to_display=None, form=BaseSearchForm, search_handler_map=None,
-                 view_full_result_route=None, keep_blank_values=0, force_empty_query=False, **kwargs):
+    def __init__(self, search_properties_to_display=None, form=BaseSearchForm, view_full_result_route=None,
+                 keep_blank_values=0, force_empty_query=False, **kwargs):
         super(SearchHandler, self).__init__(form=form, **kwargs)
 
-        ui_name = u'{}.ui'.format(self.handler_name)
-        default_handler_map = {
-            ui_name: u'component.{}.{}.ui'.format(self.component_name, self.handler_name),
-        }
-
-        if search_handler_map:
-            default_handler_map.update(search_handler_map)
-
-        self.ui_name = ui_name
-        self._route_map.update(default_handler_map)
         self.search_properties_to_display = search_properties_to_display
         self.view_full_result_route = view_full_result_route
         self.keep_blank_values = keep_blank_values
@@ -742,9 +729,9 @@ class SearchHandler(BaseFormHandler):
             if self._ui_hook_enabled:
                 self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
-            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
-                                  status_code=self.generic_failure_status_code)
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.code_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
+                                  status_code=self.failure_status_code)
 
             if self._ui_failed_hook_enabled:
                 self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
@@ -753,7 +740,7 @@ class SearchHandler(BaseFormHandler):
         else:
             self.parse_status_code(request=request, response=response)
 
-            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET, method='GET')
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.code_name), formdata=request.GET, method='GET')
 
             if self._form_config_hook_enabled:
                 self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
@@ -772,7 +759,7 @@ class SearchHandler(BaseFormHandler):
                         if self._valid_form_hook_enabled:
                             self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.VALID_FORM_HOOK_NAME)
                     except (CallbackFailed, UIFailed), e:
-                        self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+                        self.set_redirect_url(request=request, response=response, route_name=self.failure_route, status_code=self.invalid_search_status_code)
 
                         if self._callback_failed_hook_enabled:
                             self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CALLBACK_FAILED_HOOK_NAME)
@@ -783,7 +770,7 @@ class SearchHandler(BaseFormHandler):
                             self.results_ui_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.RESULTS_UI_HOOK_NAME)
 
                 elif not response.raw.status_code:
-                    self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+                    self.set_redirect_url(request=request, response=response, route_name=self.failure_route, status_code=self.invalid_search_status_code)
 
                     if self._form_error_hook_enabled:
                         self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.FORM_ERROR_HOOK_NAME)
@@ -826,9 +813,9 @@ class HeadlessSearchHandler(SearchHandler):
             if self._ui_hook_enabled:
                 self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
-            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
-                                  status_code=self.generic_failure_status_code)
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.code_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
+                                  status_code=self.failure_status_code)
 
             if self._ui_failed_hook_enabled:
                 self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
@@ -837,7 +824,7 @@ class HeadlessSearchHandler(SearchHandler):
         else:
             self.parse_status_code(request=request, response=response)
 
-            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.ui_name), formdata=request.GET, method='GET')
+            form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.code_name), formdata=request.GET, method='GET')
 
             if self._form_config_hook_enabled:
                 self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
@@ -850,7 +837,7 @@ class HeadlessSearchHandler(SearchHandler):
             response.raw.form = form_instance
 
             if not form_instance.validate():
-                self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+                self.set_redirect_url(request=request, response=response, route_name=self.failure_route, status_code=self.invalid_search_status_code)
 
                 if self._form_error_hook_enabled:
                     self.form_error_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.FORM_ERROR_HOOK_NAME)
@@ -861,7 +848,7 @@ class HeadlessSearchHandler(SearchHandler):
                 if self._valid_form_hook_enabled:
                     self.valid_form_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.VALID_FORM_HOOK_NAME)
             except (CallbackFailed, UIFailed), e:
-                self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+                self.set_redirect_url(request=request, response=response, route_name=self.failure_route, status_code=self.invalid_search_status_code)
 
                 if self._callback_failed_hook_enabled:
                     self.callback_failed_hook.send(self, request=request, response=response, form_instance=form_instance, hook_name=self.CALLBACK_FAILED_HOOK_NAME)
@@ -882,9 +869,9 @@ class AutoSearchHandler(SearchHandler):
             if self._ui_hook_enabled:
                 self.ui_hook.send(self, request=request, response=response, hook_name=self.UI_HOOK_NAME)
         except (ClientError, UIFailed), e:
-            logging.exception(u'{} when processing {}.ui'.format(e.message, self.handler_name))
-            self.set_redirect_url(request=request, response=response, route_name=self.default_route,
-                                  status_code=self.generic_failure_status_code)
+            logging.exception(u'{} when processing {}.ui'.format(e.message, self.code_name))
+            self.set_redirect_url(request=request, response=response, route_name=self.failure_route,
+                                  status_code=self.failure_status_code)
 
             if self._ui_failed_hook_enabled:
                 self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
@@ -897,7 +884,7 @@ class AutoSearchHandler(SearchHandler):
                 if self._valid_form_hook_enabled:
                     self.valid_form_hook.send(self, request=request, response=response, form_instance=None, hook_name=self.VALID_FORM_HOOK_NAME)
             except (CallbackFailed, UIFailed), e:
-                self.set_redirect_url(request=request, response=response, route_name=self.ui_name, status_code=self.invalid_search_status_code)
+                self.set_redirect_url(request=request, response=response, route_name=self.failure_route, status_code=self.invalid_search_status_code)
 
                 if self._callback_failed_hook_enabled:
                     self.callback_failed_hook.send(self, request=request, response=response, form_instance=None, hook_name=self.CALLBACK_FAILED_HOOK_NAME)

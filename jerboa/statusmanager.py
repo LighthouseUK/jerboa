@@ -1,9 +1,14 @@
 
 
 class StatusManager(object):
+    DEFAULT_SUCCESS_CODE = '1'
+    DEFAULT_FAILURE_CODE = '2'
+    DEFAULT_FORM_FAILURE_CODE = '3'
+
     statuses = {
-        '1': ('Successfully completed operation', 'success'),
-        '2': ('Failed to complete operation.', 'alert'),
+        DEFAULT_SUCCESS_CODE: ('Successfully completed operation', 'success'),
+        DEFAULT_FAILURE_CODE: ('Failed to complete operation.', 'alert'),
+        DEFAULT_FORM_FAILURE_CODE: ('Please correct the errors on the form below.', 'alert'),
     }
 
     @classmethod
