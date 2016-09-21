@@ -20,34 +20,38 @@ class AppRegistry(object):
     def reset(cls):
         cls.handlers = {}
 
-
-default_redirect_route_kwargs = {
-    'template': template,
-    'handler': None,
-    'name': None,
-    'defaults': None,
-    'build_only': False,
-    'handler_method': None,
-    'methods': None,
-    'schemes': None,
-    'redirect_to': None,
-    'redirect_to_name': None,
-    'strict_slash': True
-}
-
+"""
 default_method_definition = {
     'method': {
         'title': None,
         'code_name': None,   # mandatory
-        'page_template': None,
+        'page_template': '',
+        'page_template_type': 'html',
         'login_required': False,
         'prefix_route': True,
+        'content_type': 'text/html',
     },
-    'route': None,
+    'route': {
+        'template': template,   # mandatory
+        'handler': None,   # mandatory
+        'name': None,
+        'defaults': None,
+        'build_only': False,
+        'handler_method': None,
+        'methods': None,
+        'schemes': None,
+        'redirect_to': None,
+        'redirect_to_name': None,
+        'strict_slash': True
+    },
     'handler': {
-        'type': StandardUIHandler,   # mandatory?
+        'type': StandardUIHandler,
+        'success_route': None,
+        'failure_route': None,
+        # You can include any kwargs required by the handler class here e.g. form
     }
 }
+"""
 
 
 def parse_component_config(resource_config):
@@ -81,18 +85,14 @@ def parse_component_config(resource_config):
                                                                               default_method_config['page_template_type'])
 
             # Parse the default route config
-            # The commented out lines are just for reference (they are the args that RedirectRoute accepts)
+            # Template is the method name by default. We automatically prefix with the resource name,
+            # unless the config tells us otherwise.
+            # TODO: set the allowed http methods based on the handler type e.g. forms have GET and POST but UI only
+            # has GET
             default_route_config = {
                 'template': default_method_config['code_name'],
                 'handler': default_route_signaler,
-                # 'name': None,
-                # 'defaults': None,
-                # 'build_only': False,
-                # 'handler_method': None,
-                # 'methods': None,
-                # 'schemes': None,
-                # 'redirect_to': None,
-                # 'redirect_to_name': None,
+
                 'strict_slash': True
             }
 
@@ -100,9 +100,6 @@ def parse_component_config(resource_config):
                 default_route_config.update(method_definition['route'])
             except KeyError:
                 pass
-
-            # template is the method name by default. We automatically prefix with the resource name,
-            # unless the config tells us otherwise.
 
             route_template = default_route_config['template']
             del default_route_config['template']
@@ -132,8 +129,6 @@ def parse_component_config(resource_config):
             del default_handler_config['type']
 
             AppRegistry.handlers[handler_name] = handler_type(**default_handler_config)
-
-            # TODO: connect the handler to the signals that are sent from the route
 
 
 def crud_handler_definition_generator(component_name, form=PlaceholderForm, delete_form=DeleteModelForm, route_customizations=None, route_map=None):
@@ -269,7 +264,7 @@ def crud_handler_definition_generator(component_name, form=PlaceholderForm, dele
 
 
 def default_route_signaler(request, response, **kwargs):
-    handler_hook_name = u'{}_{}'.format(request.route.name, request.method)
+    handler_hook_name = u'{}_http_{}'.format(request.route.name, request.method.lower())
     handler_signal = signal(handler_hook_name)
 
     if bool(handler_signal.receivers):
@@ -456,6 +451,8 @@ class StandardUIHandler(BaseHandlerMixin):
         self.ui_hook = signal(self.UI_HOOK_NAME)
         self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
 
+        signal(u'{}_http_get'.format(self.code_name)).connect(self.ui_handler)
+
     @property
     def _ui_hook_enabled(self):
         return bool(self.ui_hook.receivers)
@@ -526,6 +523,9 @@ class StandardFormHandler(BaseFormHandler):
         self.duplicate_value_hook = signal(self.DUPLICATE_VALUE_HOOK_NAME)
         self.callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK_NAME)
         self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
+
+        signal(u'{}_http_get'.format(self.code_name)).connect(self.ui_handler)
+        signal(u'{}_http_post'.format(self.code_name)).connect(self.callback_handler)
 
     @property
     def _ui_hook_enabled(self):
@@ -712,6 +712,8 @@ class SearchHandler(BaseFormHandler):
         self.form_error_hook = signal(self.FORM_ERROR_HOOK_NAME)
         self.callback_failed_hook = signal(self.CALLBACK_FAILED_HOOK_NAME)
         self.ui_failed_hook = signal(self.UI_FAILED_HOOK_NAME)
+
+        signal(u'{}_http_get'.format(self.code_name)).connect(self.ui_handler)
 
     @property
     def _ui_hook_enabled(self):
