@@ -75,7 +75,7 @@ particularly relevant when using the CRUD generator -- the default is to redirec
 """
 
 
-def parse_component_config(resource_config):
+def parse_component_config(resource_config, default_template_format='html'):
     for resource, config in resource_config.iteritems():
 
         for method_definition in config['method_definitions']:
@@ -86,7 +86,6 @@ def parse_component_config(resource_config):
                 'title': None,
                 'code_name': None,
                 'page_template': '',
-                'page_template_type': 'html',
                 'login_required': False,
                 'prefix_route': True,
                 'content_type': 'text/html',
@@ -102,7 +101,7 @@ def parse_component_config(resource_config):
                 # and the method + file type by default. You can of course specify a custom path in the config.
                 default_method_config['page_template'] = '{0}/{1}.{2}'.format(resource,
                                                                               default_method_config['code_name'],
-                                                                              default_method_config['page_template_type'])
+                                                                              default_template_format)
 
             # Parse the default route config
             # Template is the method name by default. We automatically prefix with the resource name,
@@ -110,8 +109,9 @@ def parse_component_config(resource_config):
             # TODO: set the allowed http methods based on the handler type e.g. forms have GET and POST but UI only
             # has GET
             default_route_config = {
-                'template': default_method_config['code_name'],
+                'template': '/{}'.format(default_method_config['code_name']),
                 'handler': default_route_signaler,
+                'name': handler_name,
                 'strict_slash': True
             }
 
@@ -123,10 +123,10 @@ def parse_component_config(resource_config):
             route_template = default_route_config['template']
             del default_route_config['template']
 
-            method_route = NamePrefixRoute('{0}_'.format(resource), RedirectRoute(route_template, **default_route_config))
+            method_route = RedirectRoute(route_template, **default_route_config)
 
             if default_method_config['prefix_route']:
-                method_route = PathPrefixRoute('/{0}'.format(resource), method_route)
+                method_route = PathPrefixRoute('/{0}'.format(resource), [method_route])
 
             method_route.method_config = default_method_config
             AppRegistry.routes.append(method_route)
