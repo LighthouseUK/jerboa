@@ -6,7 +6,7 @@ from .utils import decode_unicode_request_params, filter_unwanted_params, set_ur
 from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
-from webapp2_extras.routes import RedirectRoute, MultiRoute, NamePrefixRoute, PathPrefixRoute
+from webapp2_extras.routes import RedirectRoute, NamePrefixRoute, PathPrefixRoute
 from urlparse import urlparse
 from datetime import datetime
 
@@ -15,10 +15,12 @@ __author__ = 'Matt'
 
 class AppRegistry(object):
     handlers = {}
+    routes = []
 
     @classmethod
     def reset(cls):
         cls.handlers = {}
+        cls.routes = []
 
 """
 default_method_definition = {
@@ -51,11 +53,16 @@ default_method_definition = {
         # You can include any kwargs required by the handler class here e.g. form
     }
 }
+
+The method config keys are added to the route. When a request comes in the route gets added to re request for reference.
+By extension you also therefore get the method config in the request. You can use this anywhere that you have access
+to the request object.
+
+        e.g. request.route.method_config['title']
 """
 
 
 def parse_component_config(resource_config):
-    app_routes = []
     for resource, config in resource_config.iteritems():
 
         for method_definition in config['method_definitions']:
@@ -92,7 +99,6 @@ def parse_component_config(resource_config):
             default_route_config = {
                 'template': default_method_config['code_name'],
                 'handler': default_route_signaler,
-
                 'strict_slash': True
             }
 
@@ -104,12 +110,13 @@ def parse_component_config(resource_config):
             route_template = default_route_config['template']
             del default_route_config['template']
 
-            name_prefixed_route = NamePrefixRoute('{0}_'.format(resource), RedirectRoute(route_template, **default_route_config))
+            method_route = NamePrefixRoute('{0}_'.format(resource), RedirectRoute(route_template, **default_route_config))
 
             if default_method_config['prefix_route']:
-                app_routes.append(PathPrefixRoute('/{0}'.format(resource), name_prefixed_route))
-            else:
-                app_routes.append(name_prefixed_route)
+                method_route = PathPrefixRoute('/{0}'.format(resource), method_route)
+
+            method_route.method_config = default_method_config
+            AppRegistry.routes.append(method_route)
 
             # Parse the default handler config
             default_handler_config = {
