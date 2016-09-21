@@ -7,6 +7,12 @@
 # TODO: test default csrf config receiver
 # TODO: test default recaptcha config receiver
 # TODO: test default search results ui receiver
+
+# New tests after refactor
+# TODO: test that request.route.method_config is set and accessible
+# TODO: test that the correct route is generated for each handler; name, prefix, template
+# TODO: check that the respective handlers correctly pick up the signal when the route is triggered e.g. user_read_http_get
+
 # -*- coding: utf-8 -*-
 """
     jerboa.test_extra
@@ -97,59 +103,19 @@ class TestCRUDConfigGenerator(unittest.TestCase):
         self.testbed.deactivate()
 
     def test_crud_generator(self):
-        read_route_config = {
-            'ui': {
-                'route_title': 'User Account',
-                'page_template': 'extra/read.html'
-            },
-            'action': {
-            },
+        method_customisation = {
+            'create': {
+                'method': {
+                    'title': 'Register User',
+                    'code_name': 'register',
+                }
+            }
 
-        }
-        update_route_config = {
-            'ui': {
-                'route_title': 'Edit User Account',
-                'page_template': 'extra/update.html'
-            },
         }
         # TODO: test that the returned config definition is valid, and that there is one for each of the CRUD operations
-        user_crud_handlers = crud_method_definition_generator(resource_name='user',
-                                                              method_customisations={
-                                                                   'read': read_route_config,
-                                                                   'update': update_route_config,
-                                                               })
-        self.assertEqual(len(user_crud_handlers), 4, 'Invalid number of generated handler configurations')
-        self.assertEqual(user_crud_handlers[0]['route_customizations'], {}, 'Create route customization not applied')
-        self.assertEqual(user_crud_handlers[1]['route_customizations'], read_route_config,
-                         'Read route customization not applied')
-        self.assertEqual(user_crud_handlers[2]['route_customizations'], update_route_config,
-                         'Update route customization not applied')
-        self.assertEqual(user_crud_handlers[3]['route_customizations'], {}, 'Delete route customization not applied')
-
-    def test_custom_route_name(self):
-        read_route_config = {
-            'ui': {
-                'route_name': 'profile',
-                'route_title': 'User Account',
-                'page_template': 'extra/read.html'
-            },
-            'action': {
-                'route_name': 'profile',
-            },
-
-        }
-        user_crud_handlers = crud_method_definition_generator(resource_name='user',
-                                                              method_customisations={
-                                                                   'read': read_route_config,
-                                                               })
-        self.assertEqual(len(user_crud_handlers), 4, 'Invalid number of generated handler configurations')
-        self.assertEqual(user_crud_handlers[0]['route_customizations'], {}, 'Create route customization not applied')
-        self.assertEqual(user_crud_handlers[1]['route_customizations'], read_route_config,
-                         'Read route customization not applied')
-        self.assertEqual(user_crud_handlers[2]['route_customizations'], {}, 'Update route customization not applied')
-        self.assertEqual(user_crud_handlers[3]['route_customizations'], {}, 'Delete route customization not applied')
-        # Check custom route name
-        self.assertEqual(user_crud_handlers[1]['config']['route_map']['read.ui'], u'component.user.profile.ui')
+        user_crud = crud_method_definition_generator(resource_name='user', method_customisations=method_customisation)
+        self.assertEqual(len(user_crud), 4, 'Invalid number of generated method definitions')
+        self.assertEqual(user_crud[0]['method']['title'], 'Register User', 'Create route customization not applied')
 
 
 class TestComponentConfigParser(unittest.TestCase):

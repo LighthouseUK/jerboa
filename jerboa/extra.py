@@ -173,7 +173,7 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'method': {
                 'title': 'Register User',
                 'code_name': 'register',
-            }
+            },
             'handler': {
                 'success_route': 'default',
             }
@@ -218,50 +218,62 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
     except KeyError:
         method_customisations['delete'] = {}
 
+    create = {
+        'method': {
+            'title': 'Create {}'.format(resource_name.title()),
+            'code_name': 'create',
+        },
+        'handler': {
+            'type': StandardFormHandler,
+            'form': form,
+            'success_route': 'default',
+        },
+    }
+    create.update(method_customisations['create'])
+
+    read = {
+        'method': {
+            'title': 'View {}'.format(resource_name.title()),
+            'code_name': 'read',
+        },
+        'handler': {
+            'type': StandardFormHandler,
+            'form': form,
+        },
+    }
+    read.update(method_customisations['read'])
+
+    update = {
+        'method': {
+            'title': 'Update {}'.format(resource_name.title()),
+            'code_name': 'update',
+        },
+        'handler': {
+            'type': StandardFormHandler,
+            'form': form,
+            'success_route': 'default',
+        },
+    }
+    update.update(method_customisations['update'])
+
+    delete = {
+        'method': {
+            'title': 'Delete {}'.format(resource_name.title()),
+            'code_name': 'delete',
+        },
+        'handler': {
+            'type': StandardFormHandler,
+            'form': delete_form,
+            'success_route': 'default',
+        },
+    }
+    delete.update(method_customisations['delete'])
+
     return [
-        {
-            'method': {
-                'title': 'Create {}'.format(resource_name.title()),
-                'code_name': 'create',
-            },
-            'handler': {
-                'type': StandardFormHandler,
-                'form': form,
-                'success_route': u'{}_{}'.format(resource_name, 'default'),
-            },
-        }.update(method_customisations['create']),
-        {
-            'method': {
-                'title': 'View {}'.format(resource_name.title()),
-                'code_name': 'read',
-            },
-            'handler': {
-                'type': StandardFormHandler,
-                'form': form,
-            },
-        }.update(method_customisations['read']),
-        {
-            'method': {
-                'title': 'Update {}'.format(resource_name.title()),
-                'code_name': 'update',
-            },
-            'handler': {
-                'type': StandardFormHandler,
-                'form': form,
-                'success_route': u'{}_{}'.format(resource_name, 'default'),
-            },
-        }.update(method_customisations['update']),
-        {
-            'method': {
-                'title': 'Delete {}'.format(resource_name.title()),
-                'code_name': 'delete',
-            },
-            'handler': {
-                'type': StandardFormHandler,
-                'form': delete_form,
-                'success_route': u'{}_{}'.format(resource_name, 'default'),
-            },
-        }.update(method_customisations['delete']),
+        create,
+        read,
+        update,
+        delete,
     ]
 
 
