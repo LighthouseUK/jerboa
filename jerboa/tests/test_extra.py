@@ -25,7 +25,7 @@ from blinker import signal
 from jerboa.exceptions import FormDuplicateValue, UIFailed, CallbackFailed
 from jerboa.renderers import retrofit_response
 from jerboa.dispatcher import custom_dispatcher, custom_adapter, CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK
-from jerboa.extra import crud_handler_definition_generator, StandardFormHandler, SearchHandler, parse_component_config, AppRegistry, StandardUIHandler
+from jerboa.extra import crud_method_definition_generator, StandardFormHandler, SearchHandler, parse_component_config, AppRegistry, StandardUIHandler
 
 __author__ = 'Matt Badger'
 
@@ -113,8 +113,8 @@ class TestCRUDConfigGenerator(unittest.TestCase):
             },
         }
         # TODO: test that the returned config definition is valid, and that there is one for each of the CRUD operations
-        user_crud_handlers = crud_handler_definition_generator(component_name='user',
-                                                               route_customizations={
+        user_crud_handlers = crud_method_definition_generator(resource_name='user',
+                                                              method_customisations={
                                                                    'read': read_route_config,
                                                                    'update': update_route_config,
                                                                })
@@ -138,8 +138,8 @@ class TestCRUDConfigGenerator(unittest.TestCase):
             },
 
         }
-        user_crud_handlers = crud_handler_definition_generator(component_name='user',
-                                                               route_customizations={
+        user_crud_handlers = crud_method_definition_generator(resource_name='user',
+                                                              method_customisations={
                                                                    'read': read_route_config,
                                                                })
         self.assertEqual(len(user_crud_handlers), 4, 'Invalid number of generated handler configurations')
@@ -180,8 +180,8 @@ class TestComponentConfigParser(unittest.TestCase):
             },
 
         }
-        user_crud_handlers = crud_handler_definition_generator(component_name='user',
-                                                               route_customizations={
+        user_crud_handlers = crud_method_definition_generator(resource_name='user',
+                                                              method_customisations={
                                                                    'read': read_route_config,
                                                                })
         crud_handler_config = {
@@ -260,7 +260,7 @@ class TestUIHandlerHooks(unittest.TestCase):
 class TestFormHandlerHooks(unittest.TestCase):
     def setUp(self):
         AppRegistry.reset()
-        user_crud_handlers = crud_handler_definition_generator(component_name='user')
+        user_crud_handlers = crud_method_definition_generator(resource_name='user')
         crud_handler_config = {
             'user': {
                 'title': 'User',

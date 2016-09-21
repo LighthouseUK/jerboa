@@ -37,8 +37,8 @@ default_method_definition = {
         'content_type': 'text/html',
     },
     'route': {
-        'template': template,   # mandatory
-        'handler': None,   # mandatory
+        'template': template,
+        'handler': None,
         'name': None,
         'defaults': None,
         'build_only': False,
@@ -62,6 +62,16 @@ By extension you also therefore get the method config in the request. You can us
 to the request object.
 
         e.g. request.route.method_config['title']
+
+
+By default we don't include any UIDs when redirecting to success handlers. This is to keep things flexible -- there are
+many possible actions you could take on a successful form submission.
+
+If you want to include query params in the success url redirect then you will need to set them manually. This is
+particularly relevant when using the CRUD generator -- the default is to redirect to 'read' on successful create/update.
+
+    e.g. handler.set_redirect_url(request=request, response=response, route_name=self.success_route,
+                                  status_code=self.success_status_code, follow_continue=True, custom_uid=XYZ)
 """
 
 
@@ -141,135 +151,117 @@ def parse_component_config(resource_config):
             AppRegistry.handlers[handler_name] = handler_type(**default_handler_config)
 
 
-def crud_handler_definition_generator(component_name, form=PlaceholderForm, delete_form=DeleteModelForm, route_customizations=None, route_map=None):
+def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete_form=DeleteModelForm,
+                                     method_customisations=None):
     """
-    `route_customizations` is a dict of the formate:
+    It is quite possible that you have to specify enough config for this generator to become redundant. We include it
+    to help with prototyping, where you just need to quickly setup routes to demonstrate UI flows.
 
-    customizations = {
-        'ui': {...}
-        'action': {...}
+    `resource_name` is the same as you would supply in the method defintion e.g. user or company
+
+    `form` is the form that should be used for creating and editing a resource
+
+    `method_customisations` is essentially the same as supplying a method definition -- you can override any of the
+        values that we set by default below. The format should be exactly the same as normal method definitions, except
+        that they should be supplied in a dict with the CRUD method names as keys
+
+
+    Example method_customisation:
+
+    {
+        'create': {
+            'method': {
+                'title': 'Register User',
+                'code_name': 'register',
+            }
+            'handler': {
+                'success_route': 'default',
+            }
+        }
+
     }
 
-    The contents of the `ui` and `action` dicts are the same as the kwargs for adding a component route. However,
-    because we are generating the config for crud handlers, you should not set the `route_type` key unless you really
-    know what you are doing. Chances are, using a different type will cause unexpected behaviour.
+    NOTE: we use 'default' as the success route for each of these methods. This allows us to show a status message,
+    without needing to set a UID in the success redirect. The advantage of this is that it allows for fast prototyping.
+    You will most likely want to customise this.
 
-    Note: If you set `route_name`, only the value from the `ui` dict will be used. So if you set `route_name` in the UI
-    dict to 'register' and then set it in the `action` dict as 'update', the component will be called 'register', and
-    so will the route. You can obviously change this by modifying the output of this function.
-
-    `route_map` is a dict of name/id => route mappings (either webapp2 route name or full url). We use
-    dict.update to merge these with the route map. Therefore, if you want to completely override a particular route, for
-    example to redirect back to a home page after login, you could overwrite one of the mappings.
-
-
-    :param component_name:
+    :param resource_name:
     :param form:
     :param delete_form:
-    :param route_map:
-    :param route_customizations:
-    :type component_name: str
+    :param method_customisations:
+    :type resource_name: str
     :type form: object
     :type delete_form: object
-    :type route_map: dict
-    :type route_customizations: dict
+    :type method_customisations: dict of dict(s)
     :return:
     """
-    # Generate handler definitions for each crud route to avoid having to type them out in full each time
-    if route_customizations is None:
-        route_customizations = {}
+    if method_customisations is None:
+        method_customisations = {}
 
     try:
-        create_name = route_customizations['create']['ui']['route_name']
+        method_customisations['create']
     except KeyError:
-        create_name = 'create'
+        method_customisations['create'] = {}
 
     try:
-        read_name = route_customizations['read']['ui']['route_name']
+        method_customisations['read']
     except KeyError:
-        read_name = 'read'
+        method_customisations['read'] = {}
 
     try:
-        update_name = route_customizations['update']['ui']['route_name']
+        method_customisations['update']
     except KeyError:
-        update_name = 'update'
+        method_customisations['update'] = {}
 
     try:
-        delete_name = route_customizations['delete']['ui']['route_name']
+        method_customisations['delete']
     except KeyError:
-        delete_name = 'delete'
+        method_customisations['delete'] = {}
 
-    route_map = {u'create.ui': u'component.{}.{}.ui'.format(component_name, create_name),
-                 u'read.ui': u'component.{}.{}.ui'.format(component_name, read_name),
-                 u'update.ui': u'component.{}.{}.ui'.format(component_name, update_name),
-                 u'delete.ui': u'component.{}.{}.ui'.format(component_name, delete_name),
-                 u'create.action': u'component.{}.{}.action'.format(component_name, create_name),
-                 u'update.action': u'component.{}.{}.action'.format(component_name, update_name),
-                 u'delete.action': u'component.{}.{}.action'.format(component_name, delete_name),
-                 u'create.success': u'component.{}.{}.ui'.format(component_name, create_name),
-                 u'update.success': u'component.{}.{}.ui'.format(component_name, update_name),
-                 u'delete.success': u'component.{}.{}.ui'.format(component_name, delete_name)}
-
-    if route_map is not None:
-        route_map.update(route_map)
-
-    # We explicitly set the routes below so that they apply any overrides that may have been specified. They don't need
-    # to be set is you are instantiating the StandardFormHandler class directly
     return [
         {
-            'type': StandardFormHandler,
-            'config': {
-                'form': form,
-                'component_name': component_name,
-                'handler_code_name': create_name,
-                'route_map': {
-                    u'create.ui': route_map[u'create.ui'],
-                    u'create.action': route_map[u'create.action'],
-                    u'create.success': route_map[u'create.success'],
-                }
+            'method': {
+                'title': 'Create {}'.format(resource_name.title()),
+                'code_name': 'create',
             },
-            'route_customizations': route_customizations.get('create', {})
-        },
-        {
-            'type': StandardUIHandler,
-            'config': {
+            'handler': {
+                'type': StandardFormHandler,
                 'form': form,
-                'component_name': component_name,
-                'handler_code_name': read_name,
-                'route_map': {
-                    u'read.ui': route_map[u'read.ui'],
-                }
+                'success_route': u'{}_{}'.format(resource_name, 'default'),
             },
-            'route_customizations': route_customizations.get('read', {})
-        },
+        }.update(method_customisations['create']),
         {
-            'type': StandardFormHandler,
-            'config': {
+            'method': {
+                'title': 'View {}'.format(resource_name.title()),
+                'code_name': 'read',
+            },
+            'handler': {
+                'type': StandardFormHandler,
                 'form': form,
-                'component_name': component_name,
-                'handler_code_name': update_name,
-                'route_map': {
-                    u'update.ui': route_map[u'update.ui'],
-                    u'update.action': route_map[u'update.action'],
-                    u'update.success': route_map[u'update.success'],
-                }
             },
-            'route_customizations': route_customizations.get('update', {})
-        },
+        }.update(method_customisations['read']),
         {
-            'type': StandardFormHandler,
-            'config': {
+            'method': {
+                'title': 'Update {}'.format(resource_name.title()),
+                'code_name': 'update',
+            },
+            'handler': {
+                'type': StandardFormHandler,
+                'form': form,
+                'success_route': u'{}_{}'.format(resource_name, 'default'),
+            },
+        }.update(method_customisations['update']),
+        {
+            'method': {
+                'title': 'Delete {}'.format(resource_name.title()),
+                'code_name': 'delete',
+            },
+            'handler': {
+                'type': StandardFormHandler,
                 'form': delete_form,
-                'component_name': component_name,
-                'handler_code_name': delete_name,
-                'route_map': {
-                    u'delete.ui': route_map[u'delete.ui'],
-                    u'delete.action': route_map[u'delete.action'],
-                    u'delete.success': route_map[u'delete.success'],
-                }
+                'success_route': u'{}_{}'.format(resource_name, 'default'),
             },
-            'route_customizations': route_customizations.get('delete', {})
-        },
+        }.update(method_customisations['delete']),
     ]
 
 
@@ -280,6 +272,8 @@ def default_route_signaler(request, response, **kwargs):
     if bool(handler_signal.receivers):
         # We send request as an arg to avoid having to use a separate 'sender', which would affect the method signatures
         handler_signal.send(request, response=response, hook_name=handler_hook_name)
+    else:
+        logging.debug(u'No handler registered for `{}`'.format(handler_hook_name))
 
 
 class BaseHandlerMixin(object):
