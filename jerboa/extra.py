@@ -6,6 +6,7 @@ from .utils import decode_unicode_request_params, filter_unwanted_params, set_ur
 from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
 from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
 import webapp2
+from webapp2_extras.routes import RedirectRoute, MultiRoute, NamePrefixRoute, PathPrefixRoute
 from urlparse import urlparse
 from datetime import datetime
 
@@ -37,20 +38,20 @@ default_redirect_route_kwargs = {
 default_method_definition = {
     'method': {
         'title': None,
-        'code_name': None,
+        'code_name': None,   # mandatory
         'page_template': None,
         'login_required': False,
         'prefix_route': True,
     },
     'route': None,
     'handler': {
-        'type': StandardUIHandler,
+        'type': StandardUIHandler,   # mandatory?
     }
 }
 
 
 def parse_component_config(resource_config):
-    # TODO: set the default content type to html, if not in config
+    app_routes = []
     for resource, config in resource_config.iteritems():
 
         for method_definition in config['method_definitions']:
@@ -60,9 +61,11 @@ def parse_component_config(resource_config):
             default_method_config = {
                 'title': None,
                 'code_name': None,
-                'page_template': None,
+                'page_template': '',
+                'page_template_type': 'html',
                 'login_required': False,
                 'prefix_route': True,
+                'content_type': 'text/html',
             }
 
             try:
@@ -70,18 +73,26 @@ def parse_component_config(resource_config):
             except KeyError:
                 pass
 
+            if default_method_config['page_template'] == '':
+                # The base template path should be set in your renderer. Therefore we only specify the resource type
+                # and the method + file type by default. You can of course specify a custom path in the config.
+                default_method_config['page_template'] = '{0}/{1}.{2}'.format(resource,
+                                                                              default_method_config['code_name'],
+                                                                              default_method_config['page_template_type'])
+
             # Parse the default route config
+            # The commented out lines are just for reference (they are the args that RedirectRoute accepts)
             default_route_config = {
-                'template': None,
-                'handler': None,
-                'name': None,
-                'defaults': None,
-                'build_only': False,
-                'handler_method': None,
-                'methods': None,
-                'schemes': None,
-                'redirect_to': None,
-                'redirect_to_name': None,
+                'template': default_method_config['code_name'],
+                'handler': default_route_signaler,
+                # 'name': None,
+                # 'defaults': None,
+                # 'build_only': False,
+                # 'handler_method': None,
+                # 'methods': None,
+                # 'schemes': None,
+                # 'redirect_to': None,
+                # 'redirect_to_name': None,
                 'strict_slash': True
             }
 
@@ -90,8 +101,18 @@ def parse_component_config(resource_config):
             except KeyError:
                 pass
 
-            # TODO: delete template key and pass value as arg
-            # TODO: setup the route
+            # template is the method name by default. We automatically prefix with the resource name,
+            # unless the config tells us otherwise.
+
+            route_template = default_route_config['template']
+            del default_route_config['template']
+
+            name_prefixed_route = NamePrefixRoute('{0}_'.format(resource), RedirectRoute(route_template, **default_route_config))
+
+            if default_method_config['prefix_route']:
+                app_routes.append(PathPrefixRoute('/{0}'.format(resource), name_prefixed_route))
+            else:
+                app_routes.append(name_prefixed_route)
 
             # Parse the default handler config
             default_handler_config = {
