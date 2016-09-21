@@ -1,6 +1,5 @@
 import logging
 from blinker import signal
-from .routes import Component
 from .statusmanager import StatusManager, parse_request_status_code
 from .utils import decode_unicode_request_params, filter_unwanted_params, set_url_query_parameter
 from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
@@ -23,6 +22,10 @@ class AppRegistry(object):
         cls.routes = []
 
 """
+Routes and handlers are added to the AppRegistry. This gives you a convenient place to reference them without having
+to fetch the webapp2 instance.
+
+
 default_method_definition = {
     'method': {
         'title': None,
@@ -284,20 +287,6 @@ class BaseHandlerMixin(object):
     The route handling is a little complicated. We want the allow the routes to be configurable via the handler config.
     However, at the time of init, webapp2 has not yet been initialized. This means that we have to accept the webapp2
     route names in the config and then parse them on demand (we cache the result so the overhead is minimal).
-
-    The route_map is a dict of route ID/name => route values. The route ID/name is just a short name used internally by
-    the handler - it has nothing to do with webapp2 routes.
-
-    You *must* register all desired routes for the handler if you want to use the built in redirect handling. Should
-    you need to use a route that is not registered you will have to override it using the appropriate hooks.
-
-    The route_map config parameter will accept either a webapp2 route name or a full url. So as an example you could:
-
-     - Change the `app_default` route to `component.user.read.ui`, which is the name of a webapp2 route. This would then
-        be parsed to `/user/read` internally and used for any redirects that use the `app_default` id
-
-     - Change the `app_default` route to `http://test.com`. This would then be used whenever the `app_default` id is
-        passed to `set_redirect_url`
 
     """
     def __init__(self, code_name, title, success_route=None, failure_route=None, **kwargs):
