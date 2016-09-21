@@ -106,8 +106,6 @@ def parse_component_config(resource_config, default_template_format='html'):
             # Parse the default route config
             # Template is the method name by default. We automatically prefix with the resource name,
             # unless the config tells us otherwise.
-            # TODO: set the allowed http methods based on the handler type e.g. forms have GET and POST but UI only
-            # has GET
             default_route_config = {
                 'template': '/{}'.format(default_method_config['code_name']),
                 'handler': default_route_signaler,
@@ -124,11 +122,13 @@ def parse_component_config(resource_config, default_template_format='html'):
             del default_route_config['template']
 
             method_route = RedirectRoute(route_template, **default_route_config)
+            # Attaching this to the actual route instead of the parent route object. Potentially need to move this
+            # to be able to use route.method_config
+            method_route.method_config = default_method_config
 
             if default_method_config['prefix_route']:
                 method_route = PathPrefixRoute('/{0}'.format(resource), [method_route])
 
-            method_route.method_config = default_method_config
             AppRegistry.routes.append(method_route)
 
             # Parse the default handler config
