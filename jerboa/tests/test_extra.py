@@ -132,35 +132,31 @@ class TestComponentConfigParser(unittest.TestCase):
         parse_component_config(resource_config=test_handler_config)
         self.assertEqual(len(AppRegistry.routes), 2, 'Invalid number of routes')
         self.assertEqual(len(AppRegistry.handlers), 2, 'Invalid number of handlers')
+        self.assertEqual(AppRegistry.routes[0].routes[0].method_config['title'], 'Dashboard', 'Missing method config')
+        self.assertEqual(AppRegistry.routes[1].routes[0].method_config['title'], 'User Search', 'Missing method config')
 
-    # def test_config_parser_with_crud_generator_output(self):
-    #     AppRegistry.reset()
-    #     read_route_config = {
-    #         'ui': {
-    #             'route_name': 'profile',
-    #             'route_title': 'User Account',
-    #             'page_template': 'extra/read.html'
-    #         },
-    #         'action': {
-    #             'route_name': 'profile',
-    #         },
-    #
-    #     }
-    #     user_crud_handlers = crud_method_definition_generator(resource_name='user',
-    #                                                           method_customisations={
-    #                                                                'read': read_route_config,
-    #                                                            })
-    #     crud_handler_config = {
-    #         'user': {
-    #             'title': 'User',
-    #             'handler_definitions': user_crud_handlers
-    #         }
-    #     }
-    #
-    #     parse_component_config(resource_config=crud_handler_config)
-    #     self.assertEqual(len(AppRegistry.components), 1, 'Invalid number of components')
-    #     self.assertEqual(len(AppRegistry.handlers), 4, 'Invalid number of handlers')
-    #     self.assertEqual(len(AppRegistry.components['user'].raw_routes_prefix), 7, 'Invalid number of component routes')
+    def test_config_parser_with_crud_generator_output(self):
+        AppRegistry.reset()
+        method_customisation = {
+            'create': {
+                'method': {
+                    'title': 'Register User',
+                    'code_name': 'register',
+                }
+            }
+
+        }
+        user_crud = crud_method_definition_generator(resource_name='user', method_customisations=method_customisation)
+
+        definitions = {
+            'user': {
+                'method_definitions': user_crud
+            }
+        }
+
+        parse_component_config(resource_config=definitions)
+        self.assertEqual(len(AppRegistry.routes), 4, 'Invalid number of components')
+        self.assertEqual(len(AppRegistry.handlers), 4, 'Invalid number of handlers')
 
 
 def add_routes(app_instance, route_list):
@@ -176,13 +172,12 @@ class TestUIHandlerHooks(unittest.TestCase):
         AppRegistry.reset()
         parse_component_config(resource_config=test_handler_config)
 
-        routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
-
         app = webapp2.WSGIApplication(debug=True)
         app.router.set_dispatcher(custom_dispatcher)
         app.router.set_adapter(custom_adapter)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
 
-        add_routes(app_instance=app, route_list=routes)
+        add_routes(app_instance=app, route_list=AppRegistry.routes)
         self.app = app
 
         self.testbed = testbed.Testbed()
@@ -226,23 +221,29 @@ class TestUIHandlerHooks(unittest.TestCase):
 class TestFormHandlerHooks(unittest.TestCase):
     def setUp(self):
         AppRegistry.reset()
-        user_crud_handlers = crud_method_definition_generator(resource_name='user')
-        crud_handler_config = {
+        method_customisation = {
+            'create': {
+                'method': {
+                    'title': 'Register User',
+                }
+            }
+
+        }
+        user_crud = crud_method_definition_generator(resource_name='user', method_customisations=method_customisation)
+
+        definitions = {
             'user': {
-                'title': 'User',
-                'handler_definitions': user_crud_handlers
+                'method_definitions': user_crud
             }
         }
-        parse_component_config(resource_config=crud_handler_config)
-
-        routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
+        parse_component_config(resource_config=definitions)
 
         app = webapp2.WSGIApplication(debug=True)
         app.router.set_dispatcher(custom_dispatcher)
         app.router.set_adapter(custom_adapter)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
 
-        add_routes(app_instance=app, route_list=routes)
+        add_routes(app_instance=app, route_list=AppRegistry.routes)
         self.app = app
 
         self.testbed = testbed.Testbed()
@@ -296,7 +297,7 @@ class TestFormHandlerHooks(unittest.TestCase):
         # Subscribe to signals
         handler.valid_form_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/user/create/callback', POST={'required_input': 'Test Input'})
+        request = webapp2.Request.blank('/user/create', POST={'required_input': 'Test Input'})
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 302)
@@ -309,7 +310,7 @@ class TestFormHandlerHooks(unittest.TestCase):
         signal_tester = SignalTester()
         handler.form_error_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/user/create/callback')
+        request = webapp2.Request.blank('/user/create', POST={})
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 302)
@@ -327,7 +328,7 @@ class TestFormHandlerHooks(unittest.TestCase):
             raise FormDuplicateValue('Testing duplicate value exception hook')
         handler.valid_form_hook.connect(raise_duplicate_value_exception, sender=handler)
 
-        request = webapp2.Request.blank('/user/create/callback', POST={'required_input': 'Test Input'})
+        request = webapp2.Request.blank('/user/create', POST={'required_input': 'Test Input'})
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 302)
@@ -345,7 +346,7 @@ class TestFormHandlerHooks(unittest.TestCase):
 
         handler.valid_form_hook.connect(raise_callback_failed_exception, sender=handler)
 
-        request = webapp2.Request.blank('/user/create/callback', POST={'required_input': 'Test Input'})
+        request = webapp2.Request.blank('/user/create', POST={'required_input': 'Test Input'})
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 302)
@@ -376,14 +377,12 @@ class TestSearchFormHandlerHooks(unittest.TestCase):
         AppRegistry.reset()
         parse_component_config(resource_config=test_handler_config)
 
-        routes = [component.get_routes() for component_name, component in AppRegistry.components.iteritems()]
-
         app = webapp2.WSGIApplication(debug=True)
         app.router.set_dispatcher(custom_dispatcher)
         app.router.set_adapter(custom_adapter)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
 
-        add_routes(app_instance=app, route_list=routes)
+        add_routes(app_instance=app, route_list=AppRegistry.routes)
         self.app = app
 
         self.testbed = testbed.Testbed()
@@ -440,17 +439,19 @@ class TestSearchFormHandlerHooks(unittest.TestCase):
         request = webapp2.Request.blank('/user/search?query=test')
         response = request.get_response(self.app)
 
-        self.assertEqual(response.status_int, 302)
+        self.assertEqual(response.status_int, 200)
         self.assertEquals(len(signal_tester.hook_activations[handler]), 1, u'Handler should trigger 1 hook(s)')
         self.assertEquals(signal_tester.hook_activations[handler]['valid_form'], 1,
                           u'Handler should trigger `valid_form` hook 1 time(s)')
 
     def test_form_error(self):
+        # Unless the query param is invalid, this will always return a 200 status because the form is never checked.
+        # Potentially this needs to change for a more advanced search form
         handler = AppRegistry.handlers['user_search']
         signal_tester = SignalTester()
         handler.form_error_hook.connect(signal_tester.hook_subscriber, sender=handler)
 
-        request = webapp2.Request.blank('/user/search')
+        request = webapp2.Request.blank('/user/search?query=')
         response = request.get_response(self.app)
 
         self.assertEqual(response.status_int, 302)

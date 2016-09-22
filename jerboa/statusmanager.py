@@ -21,11 +21,12 @@ class StatusManager(object):
 def parse_request_status_code(request, response):
     request_status_code = request.GET.get('status_code', False)
     if not request_status_code:
+        response.raw.status_code = 0
         return
 
     try:
         response.raw.status_message = StatusManager.statuses[request_status_code]
     except KeyError:
-        pass
+        response.raw.status_code = 0
     else:
         response.raw.status_code = request_status_code

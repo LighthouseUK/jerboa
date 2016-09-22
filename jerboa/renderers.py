@@ -40,7 +40,7 @@ def retrofit_response(sender, request, response):
     response.raw = ScratchSpace()
 
     try:
-        response.headers.add_header('Content-Type', request.route.config['content_type'])
+        response.headers.add_header('Content-Type', request.route.method_config['content_type'])
     except KeyError:
         # No content type set
         pass

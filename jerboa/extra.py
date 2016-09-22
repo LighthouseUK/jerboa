@@ -201,73 +201,153 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
     try:
         method_customisations['create']
     except KeyError:
-        method_customisations['create'] = {}
+        method_customisations['create'] = {
+            'method': {},
+            'route': {},
+            'handler': {},
+        }
+    else:
+        try:
+            method_customisations['create']['method']
+        except KeyError:
+            method_customisations['create']['method'] = {}
+        try:
+            method_customisations['create']['route']
+        except KeyError:
+            method_customisations['create']['route'] = {}
+        try:
+            method_customisations['create']['handler']
+        except KeyError:
+            method_customisations['create']['handler'] = {}
 
     try:
         method_customisations['read']
     except KeyError:
-        method_customisations['read'] = {}
+        method_customisations['read'] = {
+            'method': {},
+            'route': {},
+            'handler': {},
+        }
+    else:
+        try:
+            method_customisations['read']['method']
+        except KeyError:
+            method_customisations['read']['method'] = {}
+        try:
+            method_customisations['read']['route']
+        except KeyError:
+            method_customisations['read']['route'] = {}
+        try:
+            method_customisations['read']['handler']
+        except KeyError:
+            method_customisations['read']['handler'] = {}
 
     try:
         method_customisations['update']
     except KeyError:
-        method_customisations['update'] = {}
+        method_customisations['update'] = {
+            'method': {},
+            'route': {},
+            'handler': {},
+        }
+    else:
+        try:
+            method_customisations['update']['method']
+        except KeyError:
+            method_customisations['update']['method'] = {}
+        try:
+            method_customisations['update']['route']
+        except KeyError:
+            method_customisations['update']['route'] = {}
+        try:
+            method_customisations['update']['handler']
+        except KeyError:
+            method_customisations['update']['handler'] = {}
 
     try:
         method_customisations['delete']
     except KeyError:
-        method_customisations['delete'] = {}
+        method_customisations['delete'] = {
+            'method': {},
+            'route': {},
+            'handler': {},
+        }
+    else:
+        try:
+            method_customisations['delete']['method']
+        except KeyError:
+            method_customisations['delete']['method'] = {}
+        try:
+            method_customisations['delete']['route']
+        except KeyError:
+            method_customisations['delete']['route'] = {}
+        try:
+            method_customisations['delete']['handler']
+        except KeyError:
+            method_customisations['delete']['handler'] = {}
 
     create = {
         'method': {
             'title': 'Create {}'.format(resource_name.title()),
             'code_name': 'create',
         },
+        'route': {},
         'handler': {
             'type': StandardFormHandler,
             'form': form,
             'success_route': 'default',
         },
     }
-    create.update(method_customisations['create'])
+    create['method'].update(method_customisations['create']['method'])
+    create['route'].update(method_customisations['create']['route'])
+    create['handler'].update(method_customisations['create']['handler'])
 
     read = {
         'method': {
             'title': 'View {}'.format(resource_name.title()),
             'code_name': 'read',
         },
+        'route': {},
         'handler': {
             'type': StandardFormHandler,
             'form': form,
         },
     }
-    read.update(method_customisations['read'])
+    read['method'].update(method_customisations['read']['method'])
+    read['route'].update(method_customisations['read']['route'])
+    read['handler'].update(method_customisations['read']['handler'])
 
     update = {
         'method': {
             'title': 'Update {}'.format(resource_name.title()),
             'code_name': 'update',
         },
+        'route': {},
         'handler': {
             'type': StandardFormHandler,
             'form': form,
             'success_route': 'default',
         },
     }
-    update.update(method_customisations['update'])
+    update['method'].update(method_customisations['update']['method'])
+    update['route'].update(method_customisations['update']['route'])
+    update['handler'].update(method_customisations['update']['handler'])
 
     delete = {
         'method': {
             'title': 'Delete {}'.format(resource_name.title()),
             'code_name': 'delete',
         },
+        'route': {},
         'handler': {
             'type': StandardFormHandler,
             'form': delete_form,
             'success_route': 'default',
         },
     }
-    delete.update(method_customisations['delete'])
+    delete['method'].update(method_customisations['delete']['method'])
+    delete['route'].update(method_customisations['delete']['route'])
+    delete['handler'].update(method_customisations['delete']['handler'])
 
     return [
         create,
@@ -283,7 +363,7 @@ def default_route_signaler(request, response, **kwargs):
 
     if bool(handler_signal.receivers):
         # We send request as an arg to avoid having to use a separate 'sender', which would affect the method signatures
-        handler_signal.send(request, response=response, hook_name=handler_hook_name)
+        handler_signal.send(request, response=response)
     else:
         logging.debug(u'No handler registered for `{}`'.format(handler_hook_name))
 
