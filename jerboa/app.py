@@ -1,15 +1,109 @@
+# coding=utf-8
+import os
 import logging
-from blinker import signal
-from .statusmanager import StatusManager, parse_request_status_code
-from .utils import decode_unicode_request_params, filter_unwanted_params, set_url_query_parameter
-from .forms import DeleteModelForm, BaseSearchForm, PlaceholderForm
-from .exceptions import UIFailed, CallbackFailed, FormDuplicateValue, ClientError, InvalidResourceUID, ApplicationError
+import inspect
 import webapp2
-from webapp2_extras.routes import RedirectRoute, NamePrefixRoute, PathPrefixRoute
-from urlparse import urlparse
+from webob import exc
+from blinker import signal
 from datetime import datetime
+from urlparse import urlparse
+from google.appengine.api import namespace_manager
+from webapp2_extras.routes import RedirectRoute, PathPrefixRoute, MultiRoute
+from .forms import PlaceholderForm, BaseSearchForm, DeleteModelForm
+from .utils import decode_unicode_request_params, filter_unwanted_params, set_url_query_parameter
+
 
 __author__ = 'Matt'
+
+
+"""
+These are the exceptions used by Jerboa. Each inherits from `BaseAppException` so that we can catch them all in the
+dispatcher. Generally it is frowned upon to catch such a wide array of errors, but in this case it allows us attempt
+a recovery if something happened during a request dispatch.
+"""
+
+
+class BaseAppException(Exception):
+    pass
+
+
+class ApplicationError(BaseAppException):
+    # This can be used when something goes wrong when handling a request
+    pass
+
+
+class ClientError(BaseAppException):
+    def __init__(self, message, response_code=400):
+
+        # Call the base class constructor with the parameters it needs
+        super(ClientError, self).__init__(message)
+
+        # Now for your custom code...
+        self.response_code = response_code
+
+
+class UserLoggedInException(ClientError):
+    def __init__(self, message=None, response_code=403):
+        if message is None:
+            message = 'User cannot be logged in for this operation'
+        super(UserLoggedInException, self).__init__(message=message, response_code=response_code)
+
+
+class InvalidUserException(ClientError):
+    def __init__(self, message=None, response_code=403):
+        if message is None:
+            message = 'Either the user is missing or invalid for this request'
+        super(InvalidUserException, self).__init__(message=message, response_code=response_code)
+
+
+class UnauthorizedUserException(ClientError):
+    def __init__(self, message=None, response_code=403):
+        if message is None:
+            message = 'User is valid but does not have permission to execute this request'
+        super(UnauthorizedUserException, self).__init__(message=message, response_code=response_code)
+
+
+# === Handler Exceptions ===
+class InvalidResourceUID(ClientError):
+    def __init__(self, message=None, response_code=403, resource_uid=''):
+        if message is None:
+            message = '`{}` is not a valid resource UID'.format(resource_uid)
+        super(InvalidResourceUID, self).__init__(message=message, response_code=response_code)
+
+
+class UIFailed(Exception):
+    """
+    Can be used by ui functions. Allows them to fail if some condition is not met e.g. request parameter missing.
+    """
+    pass
+
+
+class CallbackFailed(Exception):
+    """
+    Can be used by callback functions that are invoked upon form validation. Allows them to fail despite the form data
+     begin valid e.g. if a unique value already exists.
+    """
+    pass
+
+
+class FormDuplicateValue(ValueError, CallbackFailed):
+    """
+    Can be used by implementors that use the supplied hooks. Say you go to attempt to insert data into a datastore and
+    it fails because a value already exists. Rather than having to do lots of checking and fetching of values, simply
+    pass this exception the field names of the duplicates and raise it. The CRUD handler will do the rest.
+    """
+
+    def __init__(self, duplicates, message=u'Could not save the form because duplicate values were detected'):
+        super(FormDuplicateValue, self).__init__(message)
+        self.duplicates = duplicates
+
+
+"""
+This is the App Registry. It is simply a container object for all of the app routes and handlers. This makes it a little
+easier to reference either thing without polluting the global namespace.
+
+The reset method is generally only useful when testing.
+"""
 
 
 class AppRegistry(object):
@@ -22,8 +116,8 @@ class AppRegistry(object):
         cls.routes = []
 
 """
-Routes and handlers are added to the AppRegistry. This gives you a convenient place to reference them without having
-to fetch the webapp2 instance.
+This is the config parser. It takes a config (example below) and generates routes and handlers, connecting them via
+signals.
 
 
 default_method_definition = {
@@ -358,6 +452,15 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
 
 
 def default_route_signaler(request, response, **kwargs):
+    """
+    This is the default handler for each of the created routes. When invoked, it sends out a signal. The relevant
+    handler can then pick up the signal at process the request. This avoids the need to couple a handler to a route
+    directly.
+    :param request:
+    :param response:
+    :param kwargs:
+    :return:
+    """
     handler_hook_name = u'{}_http_{}'.format(request.route.name, request.method.lower())
     handler_signal = signal(handler_hook_name)
 
@@ -366,6 +469,271 @@ def default_route_signaler(request, response, **kwargs):
         handler_signal.send(request, response=response)
     else:
         logging.debug(u'No handler registered for `{}`'.format(handler_hook_name))
+
+
+def add_routes(app_instance, route_list):
+    """
+    Recursive function to add routes to a webapp2 instance.
+    :param app_instance:
+    :param route_list:
+    :return:
+    """
+    for item in route_list:
+        if isinstance(item, (webapp2.Route, MultiRoute)):
+            app_instance.router.add(item)
+        else:
+            add_routes(app_instance=app_instance, route_list=item)
+
+
+"""
+This section contains the custom dispatcher. Very little has actually changed in the way the dispatcher works. The main
+difference is that we add the ability to hook into it using signals. These hooks can be used to modify the
+request/response.
+For example you could add some config values to the request that will be picked up by any connected
+handlers. You could also check the authentication status of a request before it even touches a handler.
+
+In addition to the hooks, we add in some app error handling. Essentially, if an error occurs, we just make sure the
+correct status code is set, and that there is some debug logging. You can extend this functionality however you see fit
+by using the signals that get send out by the exception handlers.
+"""
+
+
+# add_routes(app_instance=frontend, route_list=get_component_routes())
+CUSTOM_DISPATCHER_PRE_HOOK = signal('pre_dispatch_request_hook')
+CUSTOM_DISPATCHER_POST_HOOK = signal('post_dispatch_request_hook')
+CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK = signal('pre_process_response_hook')
+CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK = signal('post_process_response_hook')
+
+# Exception handling
+CLIENT_404_HOOK = signal('client_404_hook')
+CLIENT_EXCEPTION_HOOK = signal('client_exception_hook')
+LOGGED_IN_USER_EXCEPTION_HOOK = signal('logged_in_user_exception_hook')
+INVALID_USER_EXCEPTION_HOOK = signal('invalid_user_exception_hook')
+UNAUTHORIZED_USER_EXCEPTION_HOOK = signal('unauthorized_user_exception_hook')
+APP_EXCEPTION_HOOK = signal('app_exception_hook')
+UNHANDLED_EXCEPTION_HOOK = signal('unhandled_exception_hook')
+
+
+def _handle_exception(exception, request, response, router=None):
+    logging.exception('Non specific exception encountered.')
+
+    if bool(UNHANDLED_EXCEPTION_HOOK.receivers):
+        UNHANDLED_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
+    else:
+        webapp2.abort(500)
+
+
+def _handle_app_exception(exception, request, response, router=None):
+    logging.exception('Encountered application error.')
+
+    if bool(APP_EXCEPTION_HOOK.receivers):
+        APP_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
+    else:
+        webapp2.abort(500)
+
+
+def _handle_client_exception(exception, request, response, router=None):
+    logging.exception('Encountered client error.')
+
+    if bool(CLIENT_EXCEPTION_HOOK.receivers):
+        CLIENT_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
+    else:
+        webapp2.abort(400)
+
+
+def _handle_logged_in_user_exception(exception, request, response, router=None):
+    logging.exception('Encountered logged in user error; they don\'t need to be here')
+
+    if bool(LOGGED_IN_USER_EXCEPTION_HOOK.receivers):
+        LOGGED_IN_USER_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
+    else:
+        webapp2.abort(401)
+
+
+def _handle_invalid_user_exception(exception, request, response, router=None):
+    logging.exception('Encountered invalid user.')
+
+    if bool(INVALID_USER_EXCEPTION_HOOK.receivers):
+        INVALID_USER_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
+    else:
+        webapp2.abort(401)
+
+
+def _handle_unauthorized_user_exception(exception, request, response, router=None):
+    logging.exception('Encountered unauthorized user.')
+
+    if bool(UNAUTHORIZED_USER_EXCEPTION_HOOK.receivers):
+        UNAUTHORIZED_USER_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
+    else:
+        webapp2.abort(403)
+
+
+def _handle_404(response, router=None):
+    # redirect to a 404 page and give details about what may have happened
+    # Send out a signal for the app to hook into
+
+    if bool(CLIENT_404_HOOK.receivers):
+        CLIENT_404_HOOK.send(router or 'custom_dispatcher', response=response)
+    else:
+        webapp2.abort(404)
+
+
+"""
+This is a useful little function that automtically redirects to the default route of the app, assuming that it isn't '/'
+"""
+
+
+def default_route(request, response):
+    # TODO: change this to use request.config.get()
+    return webapp2.redirect(webapp2.uri_for(request.handler_config['routes']['default'], **request.GET), request=request, response=response)
+
+
+class CustomHandlerAdapter(webapp2.BaseHandlerAdapter):
+    """An adapter for dispatching requests to handler functions.
+
+    The handler is passed both the request and response objects instead of just the request as in BaseHandlerAdapter.
+    """
+
+    def __call__(self, request, response):
+        # Annoyingly, BaseHandlerAdapter does not pass the response object so we have to override it here.
+        return self.handler(request, response)
+
+
+def custom_adapter(router, handler):
+    if inspect.isclass(handler):
+        return router.default_adapter(handler)
+    else:
+        # A "view" function.
+        adapter = CustomHandlerAdapter
+        return adapter(handler)
+
+
+def custom_dispatcher(router, request, response):
+    current_namespace = namespace_manager.get_namespace()
+    try:
+        target_namespace = request.namespace
+    except AttributeError:
+        target_namespace = 'default'
+
+    try:
+        if target_namespace != 'default':
+            namespace_manager.set_namespace(target_namespace)
+
+        try:
+            rv = router.match(request)
+        except exc.HTTPMethodNotAllowed, e:
+            logging.exception('HTTP method not allowed for route')
+            return _handle_app_exception(exception=e, request=request, response=response, router=router)
+
+        if rv is None:
+            logging.exception('Failed to match route.')
+            _handle_404(response=response, router=router)
+
+        request.route, request.route_args, request.route_kwargs = rv
+
+        try:
+            CUSTOM_DISPATCHER_PRE_HOOK.send(router, request=request, response=response)
+            CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.send(router, request=request, response=response)
+
+            router.default_dispatcher(request, response)
+        except ApplicationError, e:
+            _handle_app_exception(exception=e, request=request, response=response, router=router)
+        except UserLoggedInException, e:
+            _handle_logged_in_user_exception(exception=e, request=request, response=response, router=router)
+        except InvalidUserException, e:
+            _handle_invalid_user_exception(exception=e, request=request, response=response, router=router)
+        except UnauthorizedUserException, e:
+            _handle_unauthorized_user_exception(exception=e, request=request, response=response, router=router)
+        except ClientError, e:
+            _handle_client_exception(exception=e, request=request, response=response, router=router)
+        except BaseAppException, e:
+            _handle_exception(exception=e, request=request, response=response, router=router)
+        else:
+            # We don't want to trigger this hook unless the request was successful.
+            CUSTOM_DISPATCHER_POST_HOOK.send(router, request=request, response=response)
+            CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.send(router, request=request, response=response)
+
+    finally:
+        namespace_manager.set_namespace(current_namespace)
+
+    return response
+
+
+"""
+This is a convenience class which removes the need for some of the boilerplate code associated with setting up a Jerboa
+app. It takes care of the config parsing, adds the routes, and sets up the custom dispatcher.
+"""
+
+
+class JerboaApp(webapp2.WSGIApplication):
+    # TODO: must set request.namespace in pre_request_dispatch
+    def __init__(self, webapp2_config, resource_config=None, debug=os.environ['SERVER_SOFTWARE'].startswith('Dev'),
+                 add_default_route=True):
+        super(JerboaApp, self).__init__(debug=debug, config=webapp2_config)
+
+        if add_default_route:
+            self.router.add(webapp2.Route(template='/', name='default', handler=default_route))
+
+        self.router.set_dispatcher(custom_dispatcher)
+        self.router.set_adapter(custom_adapter)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=self.router)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(custom_response_headers, sender=self.router)
+
+        self.parse_component_config(resource_config=resource_config)
+
+    parse_component_config = staticmethod(parse_component_config)
+
+    add_routes = add_routes
+
+
+"""
+Rather than sending the status message as a GET param, we simply send a status code and then look up the message later.
+
+TODO: we need to add in i18n support
+"""
+
+
+class StatusManager(object):
+    DEFAULT_SUCCESS_CODE = '1'
+    DEFAULT_FAILURE_CODE = '2'
+    DEFAULT_FORM_FAILURE_CODE = '3'
+
+    statuses = {
+        DEFAULT_SUCCESS_CODE: ('Successfully completed operation', 'success'),
+        DEFAULT_FAILURE_CODE: ('Failed to complete operation.', 'alert'),
+        DEFAULT_FORM_FAILURE_CODE: ('Please correct the errors on the form below.', 'alert'),
+    }
+
+    @classmethod
+    def add_status(cls, message, status_type):
+        new_code = str(len(cls.statuses)+1)
+        cls.statuses[new_code] = (message, status_type)
+        return new_code
+
+
+def parse_request_status_code(request, response):
+    request_status_code = request.GET.get('status_code', False)
+    if not request_status_code:
+        response.raw.status_code = 0
+        return
+
+    try:
+        response.raw.status_message = StatusManager.statuses[request_status_code]
+    except KeyError:
+        response.raw.status_code = 0
+    else:
+        response.raw.status_code = request_status_code
+
+
+"""
+Here we define the standard request handlers. There are certain patterns that apply to all apps e.g. UI rendering or
+form submission handling. Rather than repeat this code all over the place you can simply use one of the handlers below.
+
+They are designed to trigger signals at key moments during the processing of a request. So for example the form handler
+will send a signal once form validation has passed. All you need to do is connect to the signal and do whatever you need
+to do with the data. You don't have to worry about checking the form manually. Equally you can choose not to do anything
+with the data. This is what makes it very easy, and fast, to prototype in Jerboa.
+"""
 
 
 class BaseHandlerMixin(object):
@@ -998,3 +1366,73 @@ class AutoSearchHandler(SearchHandler):
             else:
                 if self._results_ui_hook_enabled:
                     self.results_ui_hook.send(self, request=request, response=response, form_instance=None, hook_name=self.RESULTS_UI_HOOK_NAME)
+
+
+"""
+Instead of passing lots of different args to the renderer we can use a scratch space. This is just a simple object that
+we set on the response object. You can then set whatever you like in it from your handlers. It just keeps things neater.
+You could choose not to use this of course, in which case there is no code to change -- just don't connect the
+`retrofit_response` function to the dispatcher.
+"""
+
+
+class ScratchSpace(object):
+    """
+        Scratch space for handlers to output data to. This data will be used by the template engine.
+
+        Use case in a Response Class:
+            response.raw.var1 = "hello"
+            response.raw.array = [1, 2, 3]
+            response.raw.dict = dict(a="abc", b="bcd")
+
+        Can be accessed in the template by just using the variables like {{var1}} or {{dict.b}}
+    """
+    pass
+
+
+def retrofit_response(sender, request, response):
+    """
+    Designed to be used via a blinker signal, hence the 'sender' arg.
+
+    Adds `raw` attribute that is used by jerboa handlers to store data needed to generate the response.
+        For example: forms, app info, and variables
+
+    Also adds the content type to the headers. If you want to override this you should change the config that is
+    applied to the route. The value supplied in the route config must be a string that can be used for the
+    `Content-Type` header.
+
+    :param sender:
+    :param request:
+    :param response:
+    :return:
+    """
+    response.raw = ScratchSpace()
+
+    try:
+        response.headers.add_header('Content-Type', request.route.method_config['content_type'])
+    except KeyError:
+        # No content type set
+        pass
+
+
+def custom_response_headers(sender, request, response):
+    """
+    Designed to be used via a blinker signal, hence the 'sender' arg.
+
+    This is an example of adding custom headers to all routes. Here we set the 'X-UA-Compatible' header, if the content
+    type is set to html. You can create your own version of this to add any headers you like.
+
+    If you need to make changes on an individual route level then you can do this in the handlers.
+
+    :param sender:
+    :param request:
+    :param response:
+    :return:
+    """
+    try:
+        if request.route.config['content_type'] == 'text/html':
+            response.headers.add_header('X-UA-Compatible', 'IE=Edge,chrome=1')
+    except KeyError:
+        # Config value does not exist
+        pass
+

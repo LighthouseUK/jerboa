@@ -1,21 +1,10 @@
-# coding=utf-8
-import re
-import logging
-import webapp2
-import pytz
-import json
-from babel import Locale
-from webapp2_extras import i18n
-from urllib import urlencode
-from urlparse import parse_qs, urlsplit, urlunsplit
 
-__author__ = 'Matt'
+
+
+
+
 
 I18N_LOCALES_KEY = 'i18n_locales'
-
-
-def get_app_config_value(config_key):
-    return webapp2.get_app().config.get(config_key, None)
 
 
 def filter_unwanted_params(request_params, unwanted=None):
@@ -99,7 +88,7 @@ def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
 
     for param_name, param_value in new_query_params.iteritems():
         query_params[param_name] = [param_value]
-    new_query_string = urlencode(query_params, doseq=True)
+    new_query_string = urllib.urlencode(query_params, doseq=True)
 
     return urlunsplit((scheme, netloc, path, new_query_string, fragment))
 

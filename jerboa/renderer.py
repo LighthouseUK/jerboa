@@ -1,71 +1,6 @@
-import types
-import webapp2
-import logging
 import jinja2
-from blinker import signal
 
 __author__ = 'Matt'
-
-
-class ScratchSpace(object):
-    """
-        Scratch space for handlers to output data to. This data will be used by the template engine.
-
-        Use case in a Response Class:
-            response.raw.var1 = "hello"
-            response.raw.array = [1, 2, 3]
-            response.raw.dict = dict(a="abc", b="bcd")
-
-        Can be accessed in the template by just using the variables like {{var1}} or {{dict.b}}
-    """
-    pass
-
-
-def retrofit_response(sender, request, response):
-    """
-    Designed to be used via a blinker signal, hence the 'sender' arg.
-
-    Adds `raw` attribute that is used by jerboa handlers to store data needed to generate the response.
-        For example: forms, app info, and variables
-
-    Also adds the content type to the headers. If you want to override this you should change the config that is
-    applied to the route. The value supplied in the route config must be a string that can be used for the
-    `Content-Type` header.
-
-    :param sender:
-    :param request:
-    :param response:
-    :return:
-    """
-    response.raw = ScratchSpace()
-
-    try:
-        response.headers.add_header('Content-Type', request.route.method_config['content_type'])
-    except KeyError:
-        # No content type set
-        pass
-
-
-def custom_response_headers(sender, request, response):
-    """
-    Designed to be used via a blinker signal, hence the 'sender' arg.
-
-    This is an example of adding custom headers to all routes. Here we set the 'X-UA-Compatible' header, if the content
-    type is set to html. You can create your own version of this to add any headers you like.
-
-    If you need to make changes on an individual route level then you can do this in the handlers.
-
-    :param sender:
-    :param request:
-    :param response:
-    :return:
-    """
-    try:
-        if request.route.config['content_type'] == 'text/html':
-            response.headers.add_header('X-UA-Compatible', 'IE=Edge,chrome=1')
-    except KeyError:
-        # Config value does not exist
-        pass
 
 
 class SimpleRenderer(object):
@@ -101,8 +36,8 @@ class Jinja2Renderer(object):
     """
     def __init__(self, config):
         """Initializes the Jinja2 object.
-        """
-        config = {
+
+        example_config = {
             'environment_args': {'extensions': JINJA2_EXTENSIONS,
                                  'autoescape': config.settings.getboolean('jinja2_env_autoescape',
                                                                           section=FRONTEND),},
@@ -112,6 +47,7 @@ class Jinja2Renderer(object):
             'filters': {},
             'tests': {},
         }
+        """
 
         config['environment_args']['loader'] = jinja2.FileSystemLoader(config['theme_base_template_path'])
 

@@ -1,15 +1,12 @@
-import wtforms
-import wtforms.csrf.session as csrf_lib
-import webapp2_extras.i18n as i18n
 import re
-from .utils import STATIC_LANGUAGE_CODES_TUPLE, UK_COUNTY_SET, STATIC_COUNTRY_CODES_SET, STATIC_LANGUAGE_CODES_SET, UK_COUNTIES_TUPLE, STATIC_COUNTRY_LABLES_TUPLE, US_STATES_SET
+import json
 import urllib
 import urllib2
-import json
-import datetime
-
-__author__ = 'Matt'
-
+import wtforms
+from datetime import datetime
+import wtforms.csrf.session as csrf_lib
+import webapp2_extras.i18n as i18n
+from .utils import STATIC_LANGUAGE_CODES_TUPLE, UK_COUNTY_SET, STATIC_COUNTRY_CODES_SET, STATIC_LANGUAGE_CODES_SET, UK_COUNTIES_TUPLE, STATIC_COUNTRY_LABLES_TUPLE, US_STATES_SET
 
 DEFAULT_NONE_VALUE = u'NONE'
 
@@ -749,7 +746,7 @@ class GAESortOptions(BaseSortOptionsForm, GAESearchLimitMixin, SortByPlaceholder
             if self.sort_by.data in self.int_fields:
                 default_value = 0
             elif self.sort_by.data in self.date_fields:
-                default_value = datetime.datetime.now().date()
+                default_value = datetime.now().date()
             return (self.sort_by.data, self.sort_direction.data, default_value),
         else:
             return None
