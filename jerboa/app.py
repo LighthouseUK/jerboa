@@ -893,13 +893,14 @@ class BaseHandlerMixin(object):
     @staticmethod
     def valid_url(url):
         """
-        Credit to: http://stackoverflow.com/a/38020041
+        Crude url check method that returns a boolean value for valid or not.
+
         :param url:
         :return:
         """
         try:
             result = urlparse(url)
-            return True if [result.scheme, result.netloc, result.path] else False
+            return True if result.scheme or result.netloc else False
         except:
             return False
 
