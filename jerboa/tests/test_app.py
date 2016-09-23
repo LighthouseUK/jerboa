@@ -27,7 +27,7 @@ from google.appengine.ext import testbed
 import webapp2
 from webapp2 import Route
 from blinker import signal
-from jerboa.renderer import Jinja2Renderer
+from jerboa.renderers import Jinja2Renderer
 from jerboa.app import *
 
 __author__ = 'Matt Badger'
@@ -172,7 +172,7 @@ class TestUIHandlerHooks(unittest.TestCase):
         app = webapp2.WSGIApplication(debug=True)
         app.router.set_dispatcher(custom_dispatcher)
         app.router.set_adapter(custom_adapter)
-        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=app.router)
 
         add_routes(app_instance=app, route_list=AppRegistry.routes)
         self.app = app
@@ -238,7 +238,7 @@ class TestFormHandlerHooks(unittest.TestCase):
         app = webapp2.WSGIApplication(debug=True)
         app.router.set_dispatcher(custom_dispatcher)
         app.router.set_adapter(custom_adapter)
-        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=app.router)
 
         add_routes(app_instance=app, route_list=AppRegistry.routes)
         self.app = app
@@ -377,7 +377,7 @@ class TestSearchFormHandlerHooks(unittest.TestCase):
         app = webapp2.WSGIApplication(debug=True)
         app.router.set_dispatcher(custom_dispatcher)
         app.router.set_adapter(custom_adapter)
-        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=app.router)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=app.router)
 
         add_routes(app_instance=app, route_list=AppRegistry.routes)
         self.app = app

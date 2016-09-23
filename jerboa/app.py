@@ -109,11 +109,13 @@ The reset method is generally only useful when testing.
 class AppRegistry(object):
     handlers = {}
     routes = []
+    renderers = {}
 
     @classmethod
     def reset(cls):
         cls.handlers = {}
         cls.routes = []
+        cls.renderers = {}
 
 """
 This is the config parser. It takes a config (example below) and generates routes and handlers, connecting them via
@@ -561,16 +563,30 @@ def _handle_client_exception(exception, request, response, router=None):
     if bool(CLIENT_EXCEPTION_HOOK.receivers):
         CLIENT_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
     else:
-        webapp2.abort(400)
+        if response.redirect_to:
+            webapp2.redirect(uri=response.redirect_to, request=request, response=response)
+        else:
+            webapp2.abort(400)
 
 
 def _handle_logged_in_user_exception(exception, request, response, router=None):
+    """
+    This is a somewhat unique case where we actually want to redirect the user on error, instead of responding with
+    the relevant http error code. By default we just redirect them to the default route with an error message.
+
+    :param exception:
+    :param request:
+    :param response:
+    :param router:
+    :return:
+    """
     logging.exception('Encountered logged in user error; they don\'t need to be here')
 
     if bool(LOGGED_IN_USER_EXCEPTION_HOOK.receivers):
         LOGGED_IN_USER_EXCEPTION_HOOK.send(router or 'custom_dispatcher', exception=exception, request=request, response=response)
     else:
-        webapp2.abort(401)
+        redirect_url = webapp2.uri_for('default', status_code=StatusManager.DEFAULT_USER_LOGGED_IN_CODE)
+        webapp2.redirect(uri=redirect_url, request=request, response=response)
 
 
 def _handle_invalid_user_exception(exception, request, response, router=None):
@@ -607,8 +623,7 @@ This is a useful little function that automtically redirects to the default rout
 
 
 def default_route(request, response):
-    # TODO: change this to use request.config.get()
-    return webapp2.redirect(webapp2.uri_for(request.handler_config['routes']['default'], **request.GET), request=request, response=response)
+    return webapp2.redirect(webapp2.uri_for(request.settings.get('default_route', section=request.frontend), **request.GET), request=request, response=response)
 
 
 class CustomHandlerAdapter(webapp2.BaseHandlerAdapter):
@@ -653,6 +668,9 @@ def custom_dispatcher(router, request, response):
             _handle_404(response=response, router=router)
 
         request.route, request.route_args, request.route_kwargs = rv
+        # We add this before passing response to the pre_process hook. That way any connected functions can set response
+        # values without having to check it they can or not.
+        response.raw = ScratchSpace()
 
         try:
             CUSTOM_DISPATCHER_PRE_HOOK.send(router, request=request, response=response)
@@ -684,13 +702,19 @@ def custom_dispatcher(router, request, response):
 
 """
 This is a convenience class which removes the need for some of the boilerplate code associated with setting up a Jerboa
-app. It takes care of the config parsing, adds the routes, and sets up the custom dispatcher.
+app. It takes care of the config parsing, adds the routes, and sets up the custom dispatcher. By default it also tries
+to invoke a renderer during the post processing stage of a request.
 """
+
+
+def default_post_request_hook(sender, request, response):
+    if request.method == 'GET' and response.status_int == 200:
+        AppRegistry.renderers['default'].render(template_name=request.method_config['page_template'], response=response)
 
 
 class JerboaApp(webapp2.WSGIApplication):
     # TODO: must set request.namespace in pre_request_dispatch
-    def __init__(self, webapp2_config, resource_config=None, debug=None, add_default_route=True):
+    def __init__(self, resource_config, renderer_config=None, add_default_route=True, debug=None, webapp2_config=None):
         if debug is None:
             try:
                 debug = os.environ['SERVER_SOFTWARE'].startswith('Dev')
@@ -704,8 +728,15 @@ class JerboaApp(webapp2.WSGIApplication):
 
         self.router.set_dispatcher(custom_dispatcher)
         self.router.set_adapter(custom_adapter)
-        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(retrofit_response, sender=self.router)
+        CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=self.router)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(custom_response_headers, sender=self.router)
+        CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.connect(default_post_request_hook, sender=self.router)
+
+        if renderer_config is not None:
+            renderer_type = renderer_config['type']
+            del renderer_config['type']
+
+            AppRegistry.renderers['default'] = renderer_type(**renderer_config)
 
         self.parse_component_config(resource_config=resource_config)
 
@@ -725,11 +756,13 @@ class StatusManager(object):
     DEFAULT_SUCCESS_CODE = '1'
     DEFAULT_FAILURE_CODE = '2'
     DEFAULT_FORM_FAILURE_CODE = '3'
+    DEFAULT_USER_LOGGED_IN_CODE = '4'
 
     statuses = {
-        DEFAULT_SUCCESS_CODE: ('Successfully completed operation', 'success'),
-        DEFAULT_FAILURE_CODE: ('Failed to complete operation.', 'alert'),
-        DEFAULT_FORM_FAILURE_CODE: ('Please correct the errors on the form below.', 'alert'),
+        DEFAULT_SUCCESS_CODE: (u'Successfully completed operation', 'success'),
+        DEFAULT_FAILURE_CODE: (u'Failed to complete operation.', 'alert'),
+        DEFAULT_FORM_FAILURE_CODE: (u'Please correct the errors on the form below.', 'alert'),
+        DEFAULT_USER_LOGGED_IN_CODE: (u'You can\'t visit that page as a logged in user.', 'alert'),
     }
 
     @classmethod
@@ -1418,14 +1451,11 @@ class ScratchSpace(object):
     pass
 
 
-def retrofit_response(sender, request, response):
+def set_content_type(sender, request, response):
     """
     Designed to be used via a blinker signal, hence the 'sender' arg.
 
-    Adds `raw` attribute that is used by jerboa handlers to store data needed to generate the response.
-        For example: forms, app info, and variables
-
-    Also adds the content type to the headers. If you want to override this you should change the config that is
+    Adds the content type to the headers. If you want to override this you should change the config that is
     applied to the route. The value supplied in the route config must be a string that can be used for the
     `Content-Type` header.
 
@@ -1434,7 +1464,6 @@ def retrofit_response(sender, request, response):
     :param response:
     :return:
     """
-    response.raw = ScratchSpace()
 
     try:
         response.headers.add_header('Content-Type', request.route.method_config['content_type'])
