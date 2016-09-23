@@ -8,6 +8,8 @@ from babel import Locale
 from webapp2_extras import i18n
 import urllib
 from urlparse import parse_qs, urlsplit, urlunsplit
+from Crypto.Util.asn1 import DerSequence
+from binascii import a2b_base64
 
 
 I18N_LOCALES_KEY = 'i18n_locales'
@@ -97,6 +99,23 @@ def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
     new_query_string = urllib.urlencode(query_params, doseq=True)
 
     return urlunsplit((scheme, netloc, path, new_query_string, fragment))
+
+
+def convert_pem_to_rsa_string(pem):
+    # Convert from PEM to DER
+    lines = pem.replace(" ", '').split()
+    der = a2b_base64(''.join(lines[1:-1]))
+
+    # Extract subjectPublicKeyInfo field from X.509 certificate (see RFC3280)
+    cert = DerSequence()
+    cert.decode(der)
+    tbsCertificate = DerSequence()
+    tbsCertificate.decode(cert[0])
+    return tbsCertificate[6]
+    # Alternately you could return an actual RSA key instance
+    # Initialize RSA key
+    # rsa_key = RSA.importKey(subjectPublicKeyInfo)
+    # return rsa_key
 
 
 # Loading pycountry was annoying me with all of it's debug messages. As the data is relatively static it makes sense to

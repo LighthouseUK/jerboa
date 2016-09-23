@@ -102,6 +102,9 @@ class FormDuplicateValue(ValueError, CallbackFailed):
 This is the App Registry. It is simply a container object for all of the app routes and handlers. This makes it a little
 easier to reference either thing without polluting the global namespace.
 
+Most of the time it would be easier to just use the registry built into webapp2. But if you want to create your own
+instance you can.
+
 The reset method is generally only useful when testing.
 """
 
@@ -111,11 +114,10 @@ class AppRegistry(object):
     routes = []
     renderers = {}
 
-    @classmethod
-    def reset(cls):
-        cls.handlers = {}
-        cls.routes = []
-        cls.renderers = {}
+    def reset(self):
+        self.handlers = {}
+        self.routes = []
+        self.renderers = {}
 
 """
 This is the config parser. It takes a config (example below) and generates routes and handlers, connecting them via
@@ -171,7 +173,7 @@ particularly relevant when using the CRUD generator -- the default is to redirec
 """
 
 
-def generate_route(resource, route_config, method_config, registry=AppRegistry):
+def generate_route(route_config, method_config):
     route_template = route_config['template']
     del route_config['template']
 
@@ -183,14 +185,14 @@ def generate_route(resource, route_config, method_config, registry=AppRegistry):
     return method_config['prefix_route'], method_route
 
 
-def generate_handler(handler_name, handler_config, registry=AppRegistry):
+def generate_handler(handler_config):
     handler_type = handler_config['type']
     del handler_config['type']
 
-    registry.handlers[handler_name] = handler_type(**handler_config)
+    return handler_type(**handler_config)
 
 
-def parse_component_config(resource_config, default_login=False, default_template_format='html'):
+def parse_component_config(resource_config, app_registry, default_login=False, default_template_format='html'):
     for resource, config in resource_config.iteritems():
         resource_routes_prefixed = []
         for method_definition in config['method_definitions']:
@@ -240,7 +242,7 @@ def parse_component_config(resource_config, default_login=False, default_templat
                 default_route_config.update(method_definition['route'])
             except KeyError:
                 # Even if the dict update fails, we still want to generate a route with the default values
-                prefixed, method_route = generate_route(resource=resource, route_config=default_route_config,
+                prefixed, method_route = generate_route(route_config=default_route_config,
                                                         method_config=default_method_config)
                 if prefixed:
                     resource_routes_prefixed.append(method_route)
@@ -251,12 +253,12 @@ def parse_component_config(resource_config, default_login=False, default_templat
                 pass
             else:
                 # The dict update works so we generate the route with the updated values
-                prefixed, method_route = generate_route(resource=resource, route_config=default_route_config,
+                prefixed, method_route = generate_route(route_config=default_route_config,
                                                         method_config=default_method_config)
                 if prefixed:
                     resource_routes_prefixed.append(method_route)
                 else:
-                    AppRegistry.routes.append(method_route)
+                    app_registry.routes.append(method_route)
 
             # Parse the default handler config
             default_handler_config = {
@@ -271,13 +273,13 @@ def parse_component_config(resource_config, default_login=False, default_templat
                 default_handler_config.update(method_definition['handler'])
             except KeyError:
                 # Even if the dict update fails, we still want to generate a handler with the default values
-                generate_handler(handler_name=handler_name, handler_config=default_handler_config)
+                app_registry.handlers[handler_name] = generate_handler(handler_config=default_handler_config)
             except TypeError:
                 # The value was set explicitly to None, so we skip the handler generation
                 pass
             else:
                 # The dict update works so we generate the handler with the updated values
-                generate_handler(handler_name=handler_name, handler_config=default_handler_config)
+                app_registry.handlers[handler_name] = generate_handler(handler_config=default_handler_config)
 
         if resource_routes_prefixed:
             # By adding the prefixed routes in one go we group them all together as a single entry. This can give a
@@ -739,6 +741,8 @@ class JerboaApp(webapp2.WSGIApplication):
 
         super(JerboaApp, self).__init__(debug=debug, config=webapp2_config)
 
+        self.app_registry = AppRegistry()
+
         if add_default_route:
             self.router.add(webapp2.Route(template='/', name='default', handler=default_route))
 
@@ -752,11 +756,12 @@ class JerboaApp(webapp2.WSGIApplication):
             renderer_type = renderer_config['type']
             del renderer_config['type']
 
-            AppRegistry.renderers['default'] = renderer_type(config=renderer_config)
+            self.app_registry.renderers['default'] = renderer_type(config=renderer_config)
 
-        self.parse_component_config(resource_config=resource_config, default_login=default_login)
+        self.parse_component_config(resource_config=resource_config, app_registry=self.app_registry,
+                                    default_login=default_login)
 
-        if AppRegistry.routes:
+        if self.app_registry.routes:
             for route in AppRegistry.routes:
                 self.router.add(route)
 
