@@ -1,7 +1,13 @@
-
-
-
-
+# coding=utf-8
+import re
+import logging
+import webapp2
+import pytz
+import json
+from babel import Locale
+from webapp2_extras import i18n
+import urllib
+from urlparse import parse_qs, urlsplit, urlunsplit
 
 
 I18N_LOCALES_KEY = 'i18n_locales'
@@ -81,7 +87,7 @@ def set_url_query_parameter(url, new_query_params, keep_blank_values=0):
 
     Solution originally from: http://stackoverflow.com/a/12897375
     :param url:
-    :param new_query_params dict:
+    :param new_query_params:
     """
     scheme, netloc, path, query_string, fragment = urlsplit(url)
     query_params = parse_qs(query_string, keep_blank_values=keep_blank_values)

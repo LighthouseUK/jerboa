@@ -169,6 +169,28 @@ particularly relevant when using the CRUD generator -- the default is to redirec
 """
 
 
+def generate_route(resource, route_config, method_config, registry=AppRegistry):
+    route_template = route_config['template']
+    del route_config['template']
+
+    method_route = RedirectRoute(route_template, **route_config)
+    # Attaching this to the actual route instead of the parent route object. Potentially need to move this
+    # to be able to use route.method_config
+    method_route.method_config = method_config
+
+    if method_config['prefix_route']:
+        method_route = PathPrefixRoute('/{0}'.format(resource), [method_route])
+
+    registry.routes.append(method_route)
+
+
+def generate_handler(handler_name, handler_config, registry=AppRegistry):
+    handler_type = handler_config['type']
+    del handler_config['type']
+
+    registry.handlers[handler_name] = handler_type(**handler_config)
+
+
 def parse_component_config(resource_config, default_template_format='html'):
     for resource, config in resource_config.iteritems():
 
@@ -188,6 +210,9 @@ def parse_component_config(resource_config, default_template_format='html'):
             try:
                 default_method_config.update(method_definition['method'])
             except KeyError:
+                pass
+            except TypeError:
+                # The value was set explicitly to None, so we skip the generation
                 pass
 
             if default_method_config['page_template'] == '':
@@ -210,20 +235,16 @@ def parse_component_config(resource_config, default_template_format='html'):
             try:
                 default_route_config.update(method_definition['route'])
             except KeyError:
+                # Even if the dict update fails, we still want to generate a route with the default values
+                generate_route(resource=resource, route_config=default_route_config,
+                               method_config=default_method_config)
+            except TypeError:
+                # The value was set explicitly to None, so we skip the rotue generation
                 pass
-
-            route_template = default_route_config['template']
-            del default_route_config['template']
-
-            method_route = RedirectRoute(route_template, **default_route_config)
-            # Attaching this to the actual route instead of the parent route object. Potentially need to move this
-            # to be able to use route.method_config
-            method_route.method_config = default_method_config
-
-            if default_method_config['prefix_route']:
-                method_route = PathPrefixRoute('/{0}'.format(resource), [method_route])
-
-            AppRegistry.routes.append(method_route)
+            else:
+                # The dict update works so we generate the route with the updated values
+                generate_route(resource=resource, route_config=default_route_config,
+                               method_config=default_method_config)
 
             # Parse the default handler config
             default_handler_config = {
@@ -237,12 +258,14 @@ def parse_component_config(resource_config, default_template_format='html'):
             try:
                 default_handler_config.update(method_definition['handler'])
             except KeyError:
+                # Even if the dict update fails, we still want to generate a handler with the default values
+                generate_handler(handler_name=handler_name, handler_config=default_handler_config)
+            except TypeError:
+                # The value was set explicitly to None, so we skip the handler generation
                 pass
-
-            handler_type = default_handler_config['type']
-            del default_handler_config['type']
-
-            AppRegistry.handlers[handler_name] = handler_type(**default_handler_config)
+            else:
+                # The dict update works so we generate the handler with the updated values
+                generate_handler(handler_name=handler_name, handler_config=default_handler_config)
 
 
 def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete_form=DeleteModelForm,
@@ -667,8 +690,13 @@ app. It takes care of the config parsing, adds the routes, and sets up the custo
 
 class JerboaApp(webapp2.WSGIApplication):
     # TODO: must set request.namespace in pre_request_dispatch
-    def __init__(self, webapp2_config, resource_config=None, debug=os.environ['SERVER_SOFTWARE'].startswith('Dev'),
-                 add_default_route=True):
+    def __init__(self, webapp2_config, resource_config=None, debug=None, add_default_route=True):
+        if debug is None:
+            try:
+                debug = os.environ['SERVER_SOFTWARE'].startswith('Dev')
+            except KeyError:
+                debug = True
+
         super(JerboaApp, self).__init__(debug=debug, config=webapp2_config)
 
         if add_default_route:

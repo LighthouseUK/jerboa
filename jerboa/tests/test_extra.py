@@ -26,12 +26,9 @@ import unittest
 from google.appengine.ext import testbed
 import webapp2
 from webapp2 import Route
-from webapp2_extras.routes import MultiRoute
 from blinker import signal
-from jerboa.exceptions import FormDuplicateValue, UIFailed, CallbackFailed
-from jerboa.renderers import retrofit_response
-from jerboa.dispatcher import custom_dispatcher, custom_adapter, CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK
-from jerboa.extra import crud_method_definition_generator, StandardFormHandler, SearchHandler, parse_component_config, AppRegistry, StandardUIHandler
+from jerboa.renderer import Jinja2Renderer
+from jerboa.app import *
 
 __author__ = 'Matt Badger'
 
