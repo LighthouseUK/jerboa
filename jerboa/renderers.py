@@ -48,21 +48,37 @@ class Jinja2Renderer(object):
             'tests': {},
         }
         """
-
-        config['environment_args']['loader'] = jinja2.FileSystemLoader(config['theme_base_template_path'])
+        try:
+            config['environment_args']['loader'] = jinja2.FileSystemLoader(config['theme_base_template_path'])
+        except KeyError:
+            config['environment_args'] = {
+                'loader': jinja2.FileSystemLoader(config['theme_base_template_path'])
+            }
 
         # Initialize the environment.
         self.environment = jinja2.Environment(**config['environment_args'])
 
         self.environment.globals.update({'getattr': getattr})
-        if isinstance(config['global_vars'], dict):
-            self.environment.globals.update(config['global_vars'])
+        try:
+            if isinstance(config['global_vars'], dict):
+                self.environment.globals.update(config['global_vars'])
+        except KeyError:
+            # No global vars set in config
+            pass
 
-        if isinstance(config['filters'], dict):
-            self.environment.filters.update(config['filters'])
+        try:
+            if isinstance(config['filters'], dict):
+                self.environment.filters.update(config['filters'])
+        except KeyError:
+            # No filters set in config
+            pass
 
-        if isinstance(config['tests'], dict):
-            self.environment.filters.update(config['tests'])
+        try:
+            if isinstance(config['tests'], dict):
+                self.environment.filters.update(config['tests'])
+        except KeyError:
+            # No tests set in config
+            pass
 
         if config['enable_i18n']:
             # Install i18n.

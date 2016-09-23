@@ -180,10 +180,7 @@ def generate_route(resource, route_config, method_config, registry=AppRegistry):
     # to be able to use route.method_config
     method_route.method_config = method_config
 
-    if method_config['prefix_route']:
-        method_route = PathPrefixRoute('/{0}'.format(resource), [method_route])
-
-    registry.routes.append(method_route)
+    return method_config['prefix_route'], method_route
 
 
 def generate_handler(handler_name, handler_config, registry=AppRegistry):
@@ -193,9 +190,9 @@ def generate_handler(handler_name, handler_config, registry=AppRegistry):
     registry.handlers[handler_name] = handler_type(**handler_config)
 
 
-def parse_component_config(resource_config, default_template_format='html'):
+def parse_component_config(resource_config, default_login=False, default_template_format='html'):
     for resource, config in resource_config.iteritems():
-
+        resource_routes_prefixed = []
         for method_definition in config['method_definitions']:
             handler_name = '{}_{}'.format(resource, method_definition['method']['code_name'])
 
@@ -204,7 +201,8 @@ def parse_component_config(resource_config, default_template_format='html'):
                 'title': None,
                 'code_name': None,
                 'page_template': '',
-                'login_required': False,
+                'template_format': None,
+                'login_required': default_login,
                 'prefix_route': True,
                 'content_type': 'text/html',
             }
@@ -218,11 +216,15 @@ def parse_component_config(resource_config, default_template_format='html'):
                 pass
 
             if default_method_config['page_template'] == '':
+                if default_method_config['template_format'] is not None:
+                    template_format = default_method_config['template_format']
+                else:
+                    template_format = default_template_format
                 # The base template path should be set in your renderer. Therefore we only specify the resource type
                 # and the method + file type by default. You can of course specify a custom path in the config.
                 default_method_config['page_template'] = '{0}/{1}.{2}'.format(resource,
                                                                               default_method_config['code_name'],
-                                                                              default_template_format)
+                                                                              template_format)
 
             # Parse the default route config
             # Template is the method name by default. We automatically prefix with the resource name,
@@ -238,15 +240,23 @@ def parse_component_config(resource_config, default_template_format='html'):
                 default_route_config.update(method_definition['route'])
             except KeyError:
                 # Even if the dict update fails, we still want to generate a route with the default values
-                generate_route(resource=resource, route_config=default_route_config,
-                               method_config=default_method_config)
+                prefixed, method_route = generate_route(resource=resource, route_config=default_route_config,
+                                                        method_config=default_method_config)
+                if prefixed:
+                    resource_routes_prefixed.append(method_route)
+                else:
+                    AppRegistry.routes.append(method_route)
             except TypeError:
                 # The value was set explicitly to None, so we skip the rotue generation
                 pass
             else:
                 # The dict update works so we generate the route with the updated values
-                generate_route(resource=resource, route_config=default_route_config,
-                               method_config=default_method_config)
+                prefixed, method_route = generate_route(resource=resource, route_config=default_route_config,
+                                                        method_config=default_method_config)
+                if prefixed:
+                    resource_routes_prefixed.append(method_route)
+                else:
+                    AppRegistry.routes.append(method_route)
 
             # Parse the default handler config
             default_handler_config = {
@@ -268,6 +278,12 @@ def parse_component_config(resource_config, default_template_format='html'):
             else:
                 # The dict update works so we generate the handler with the updated values
                 generate_handler(handler_name=handler_name, handler_config=default_handler_config)
+
+        if resource_routes_prefixed:
+            # By adding the prefixed routes in one go we group them all together as a single entry. This can give a
+            # performance boost to the webapp2 router when parsing requests; if the request does not match the prefix
+            # then we can skip all of the routes within it.
+            AppRegistry.routes.append(PathPrefixRoute('/{0}'.format(resource), resource_routes_prefixed))
 
 
 def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete_form=DeleteModelForm,
@@ -709,12 +725,12 @@ to invoke a renderer during the post processing stage of a request.
 
 def default_post_request_hook(sender, request, response):
     if request.method == 'GET' and response.status_int == 200:
-        AppRegistry.renderers['default'].render(template_name=request.method_config['page_template'], response=response)
+        AppRegistry.renderers['default'].render(template_name=request.route.method_config['page_template'], response=response)
 
 
 class JerboaApp(webapp2.WSGIApplication):
     # TODO: must set request.namespace in pre_request_dispatch
-    def __init__(self, resource_config, renderer_config=None, add_default_route=True, debug=None, webapp2_config=None):
+    def __init__(self, resource_config, renderer_config=None, default_login=True, add_default_route=True, debug=None, webapp2_config=None):
         if debug is None:
             try:
                 debug = os.environ['SERVER_SOFTWARE'].startswith('Dev')
@@ -736,9 +752,13 @@ class JerboaApp(webapp2.WSGIApplication):
             renderer_type = renderer_config['type']
             del renderer_config['type']
 
-            AppRegistry.renderers['default'] = renderer_type(**renderer_config)
+            AppRegistry.renderers['default'] = renderer_type(config=renderer_config)
 
-        self.parse_component_config(resource_config=resource_config)
+        self.parse_component_config(resource_config=resource_config, default_login=default_login)
+
+        if AppRegistry.routes:
+            for route in AppRegistry.routes:
+                self.router.add(route)
 
     parse_component_config = staticmethod(parse_component_config)
 
@@ -1470,6 +1490,10 @@ def set_content_type(sender, request, response):
     except KeyError:
         # No content type set
         pass
+    except AttributeError:
+        # No method_config attribute set. This should only ever happen in non-jerboa generated routes e.g. the default
+        # handler
+        pass
 
 
 def custom_response_headers(sender, request, response):
@@ -1491,5 +1515,9 @@ def custom_response_headers(sender, request, response):
             response.headers.add_header('X-UA-Compatible', 'IE=Edge,chrome=1')
     except KeyError:
         # Config value does not exist
+        pass
+    except AttributeError:
+        # No method_config attribute set. This should only ever happen in non-jerboa generated routes e.g. the default
+        # handler
         pass
 
