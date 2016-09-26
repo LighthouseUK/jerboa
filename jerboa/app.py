@@ -289,7 +289,7 @@ def parse_component_config(resource_config, app_registry, default_login=False, d
 
 
 def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete_form=DeleteModelForm,
-                                     method_customisations=None):
+                                     method_customizations=None):
     """
     It is quite possible that you have to specify enough config for this generator to become redundant. We include it
     to help with prototyping, where you just need to quickly setup routes to demonstrate UI flows.
@@ -298,12 +298,12 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
 
     `form` is the form that should be used for creating and editing a resource
 
-    `method_customisations` is essentially the same as supplying a method definition -- you can override any of the
+    `method_customizations` is essentially the same as supplying a method definition -- you can override any of the
         values that we set by default below. The format should be exactly the same as normal method definitions, except
         that they should be supplied in a dict with the CRUD method names as keys
 
 
-    Example method_customisation:
+    Example method_customization:
 
     {
         'create': {
@@ -325,103 +325,103 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
     :param resource_name:
     :param form:
     :param delete_form:
-    :param method_customisations:
+    :param method_customizations:
     :type resource_name: str
     :type form: object
     :type delete_form: object
-    :type method_customisations: dict of dict(s)
+    :type method_customizations: dict of dict(s)
     :return:
     """
-    if method_customisations is None:
-        method_customisations = {}
+    if method_customizations is None:
+        method_customizations = {}
 
     try:
-        method_customisations['create']
+        method_customizations['create']
     except KeyError:
-        method_customisations['create'] = {
+        method_customizations['create'] = {
             'method': {},
             'route': {},
             'handler': {},
         }
     else:
         try:
-            method_customisations['create']['method']
+            method_customizations['create']['method']
         except KeyError:
-            method_customisations['create']['method'] = {}
+            method_customizations['create']['method'] = {}
         try:
-            method_customisations['create']['route']
+            method_customizations['create']['route']
         except KeyError:
-            method_customisations['create']['route'] = {}
+            method_customizations['create']['route'] = {}
         try:
-            method_customisations['create']['handler']
+            method_customizations['create']['handler']
         except KeyError:
-            method_customisations['create']['handler'] = {}
+            method_customizations['create']['handler'] = {}
 
     try:
-        method_customisations['read']
+        method_customizations['read']
     except KeyError:
-        method_customisations['read'] = {
+        method_customizations['read'] = {
             'method': {},
             'route': {},
             'handler': {},
         }
     else:
         try:
-            method_customisations['read']['method']
+            method_customizations['read']['method']
         except KeyError:
-            method_customisations['read']['method'] = {}
+            method_customizations['read']['method'] = {}
         try:
-            method_customisations['read']['route']
+            method_customizations['read']['route']
         except KeyError:
-            method_customisations['read']['route'] = {}
+            method_customizations['read']['route'] = {}
         try:
-            method_customisations['read']['handler']
+            method_customizations['read']['handler']
         except KeyError:
-            method_customisations['read']['handler'] = {}
+            method_customizations['read']['handler'] = {}
 
     try:
-        method_customisations['update']
+        method_customizations['update']
     except KeyError:
-        method_customisations['update'] = {
+        method_customizations['update'] = {
             'method': {},
             'route': {},
             'handler': {},
         }
     else:
         try:
-            method_customisations['update']['method']
+            method_customizations['update']['method']
         except KeyError:
-            method_customisations['update']['method'] = {}
+            method_customizations['update']['method'] = {}
         try:
-            method_customisations['update']['route']
+            method_customizations['update']['route']
         except KeyError:
-            method_customisations['update']['route'] = {}
+            method_customizations['update']['route'] = {}
         try:
-            method_customisations['update']['handler']
+            method_customizations['update']['handler']
         except KeyError:
-            method_customisations['update']['handler'] = {}
+            method_customizations['update']['handler'] = {}
 
     try:
-        method_customisations['delete']
+        method_customizations['delete']
     except KeyError:
-        method_customisations['delete'] = {
+        method_customizations['delete'] = {
             'method': {},
             'route': {},
             'handler': {},
         }
     else:
         try:
-            method_customisations['delete']['method']
+            method_customizations['delete']['method']
         except KeyError:
-            method_customisations['delete']['method'] = {}
+            method_customizations['delete']['method'] = {}
         try:
-            method_customisations['delete']['route']
+            method_customizations['delete']['route']
         except KeyError:
-            method_customisations['delete']['route'] = {}
+            method_customizations['delete']['route'] = {}
         try:
-            method_customisations['delete']['handler']
+            method_customizations['delete']['handler']
         except KeyError:
-            method_customisations['delete']['handler'] = {}
+            method_customizations['delete']['handler'] = {}
 
     create = {
         'method': {
@@ -435,9 +435,9 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'success_route': 'default',
         },
     }
-    create['method'].update(method_customisations['create']['method'])
-    create['route'].update(method_customisations['create']['route'])
-    create['handler'].update(method_customisations['create']['handler'])
+    create['method'].update(method_customizations['create']['method'])
+    create['route'].update(method_customizations['create']['route'])
+    create['handler'].update(method_customizations['create']['handler'])
 
     read = {
         'method': {
@@ -450,9 +450,9 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'form': form,
         },
     }
-    read['method'].update(method_customisations['read']['method'])
-    read['route'].update(method_customisations['read']['route'])
-    read['handler'].update(method_customisations['read']['handler'])
+    read['method'].update(method_customizations['read']['method'])
+    read['route'].update(method_customizations['read']['route'])
+    read['handler'].update(method_customizations['read']['handler'])
 
     update = {
         'method': {
@@ -466,9 +466,9 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'success_route': 'default',
         },
     }
-    update['method'].update(method_customisations['update']['method'])
-    update['route'].update(method_customisations['update']['route'])
-    update['handler'].update(method_customisations['update']['handler'])
+    update['method'].update(method_customizations['update']['method'])
+    update['route'].update(method_customizations['update']['route'])
+    update['handler'].update(method_customizations['update']['handler'])
 
     delete = {
         'method': {
@@ -482,9 +482,9 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'success_route': 'default',
         },
     }
-    delete['method'].update(method_customisations['delete']['method'])
-    delete['route'].update(method_customisations['delete']['route'])
-    delete['handler'].update(method_customisations['delete']['handler'])
+    delete['method'].update(method_customizations['delete']['method'])
+    delete['route'].update(method_customizations['delete']['route'])
+    delete['handler'].update(method_customizations['delete']['handler'])
 
     return [
         create,

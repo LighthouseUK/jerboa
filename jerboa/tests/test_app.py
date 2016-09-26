@@ -111,7 +111,7 @@ class TestCRUDConfigGenerator(unittest.TestCase):
 
         }
         # TODO: test that the returned config definition is valid, and that there is one for each of the CRUD operations
-        user_crud = crud_method_definition_generator(resource_name='user', method_customisations=method_customisation)
+        user_crud = crud_method_definition_generator(resource_name='user', method_customizations=method_customisation)
         self.assertEqual(len(user_crud), 4, 'Invalid number of generated method definitions')
         self.assertEqual(user_crud[0]['method']['title'], 'Register User', 'Create route customization not applied')
 
@@ -143,7 +143,7 @@ class TestComponentConfigParser(unittest.TestCase):
             }
 
         }
-        user_crud = crud_method_definition_generator(resource_name='user', method_customisations=method_customisation)
+        user_crud = crud_method_definition_generator(resource_name='user', method_customizations=method_customisation)
 
         definitions = {
             'user': {
@@ -226,7 +226,7 @@ class TestFormHandlerHooks(unittest.TestCase):
             }
 
         }
-        user_crud = crud_method_definition_generator(resource_name='user', method_customisations=method_customisation)
+        user_crud = crud_method_definition_generator(resource_name='user', method_customizations=method_customisation)
 
         definitions = {
             'user': {

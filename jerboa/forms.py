@@ -6,7 +6,7 @@ import wtforms
 from datetime import datetime
 import wtforms.csrf.session as csrf_lib
 import webapp2_extras.i18n as i18n
-from .utils import STATIC_LANGUAGE_CODES_TUPLE, UK_COUNTY_SET, STATIC_COUNTRY_CODES_SET, STATIC_LANGUAGE_CODES_SET, UK_COUNTIES_TUPLE, STATIC_COUNTRY_LABLES_TUPLE, US_STATES_SET
+from .utils import STATIC_LANGUAGE_CODES_TUPLE, UK_COUNTY_SET, STATIC_COUNTRY_CODES_SET, STATIC_LANGUAGE_CODES_SET, UK_COUNTIES_TUPLE, STATIC_COUNTRY_LABLES_TUPLE, US_STATES_SET, eu_country
 
 DEFAULT_NONE_VALUE = u'NONE'
 
@@ -365,59 +365,59 @@ def MobileValidator(form, field):
 
 def USStateValidation(form, field):
     if form.country.data == 'US' and not len(field.data) > 0:
-        raise wtforms.validators.ValidationError('State is a required field for entrants in the US.')
+        raise wtforms.validators.ValidationError('State is a required field for US addresses.')
     elif form.country.data == 'US' and field.data not in US_STATES_SET:
         raise wtforms.validators.ValidationError('Please select a valid US state from the list.')
 
 
 def UKCountyValidation(form, field):
     if form.country.data == 'GB' and not len(field.data) > 0:
-        raise wtforms.validators.ValidationError('County is a required field for entrants in the UK.')
+        raise wtforms.validators.ValidationError('County is a required field for UK addresses.')
     elif form.country.data == 'GB' and field.data not in UK_COUNTY_SET:
         raise wtforms.validators.ValidationError('Please select a valid UK county from the list.')
 
 
 def UKPostCodeValidation(form, field):
     if not len(field.data) > 0 and form.country.data == 'GB':
-        raise wtforms.validators.ValidationError('Post code is a required field for entrants in the UK.')
+        raise wtforms.validators.ValidationError('Post code is a required field for UK addresses.')
 
 
 def DeliveryUSStateValidation(form, field):
     if form.delivery_country.data == 'US' and not len(field.data) > 0:
-        raise wtforms.validators.ValidationError('Delivery State is a required field for entrants in the US.')
+        raise wtforms.validators.ValidationError('Delivery State is a required field for US addresses.')
     elif form.delivery_country.data == 'US' and field.data not in US_STATES_SET:
         raise wtforms.validators.ValidationError('Please select a valid US state from the list.')
 
 
 def BillingUSStateValidation(form, field):
     if form.billing_country.data == 'US' and not len(field.data) > 0:
-        raise wtforms.validators.ValidationError('Billing State is a required field for entrants in the US.')
+        raise wtforms.validators.ValidationError('Billing State is a required field for US addresses.')
     elif form.billing_country.data == 'US' and field.data not in US_STATES_SET:
         raise wtforms.validators.ValidationError('Please select a valid US state from the list.')
 
 
 def DeliveryUKCountyValidation(form, field):
     if form.delivery_country.data == 'GB' and not len(field.data) > 0:
-        raise wtforms.validators.ValidationError('Delivery County is a required field for entrants in the UK.')
+        raise wtforms.validators.ValidationError('Delivery County is a required field for UK addresses.')
     elif form.delivery_country.data == 'GB' and field.data not in UK_COUNTY_SET:
         raise wtforms.validators.ValidationError('Please select a valid UK county from the list.')
 
 
 def BillingUKCountyValidation(form, field):
     if form.billing_country.data == 'GB' and not len(field.data) > 0:
-        raise wtforms.validators.ValidationError('Billing County is a required field for entrants in the UK.')
+        raise wtforms.validators.ValidationError('Billing County is a required field for UK addresses.')
     elif form.billing_country.data == 'GB' and field.data not in UK_COUNTY_SET:
         raise wtforms.validators.ValidationError('Please select a valid UK county from the list.')
 
 
 def DeliveryUKPostCodeValidation(form, field):
     if not len(field.data) > 0 and form.delivery_country.data == 'GB':
-        raise wtforms.validators.ValidationError('Delivery Post code is a required field for entrants in the UK.')
+        raise wtforms.validators.ValidationError('Delivery Post code is a required field for UK addresses.')
 
 
 def BillingUKPostCodeValidation(form, field):
     if not len(field.data) > 0 and form.billing_country.data == 'GB':
-        raise wtforms.validators.ValidationError('Billing Post code is a required field for entrants in the UK.')
+        raise wtforms.validators.ValidationError('Billing Post code is a required field for UK addresses.')
 
 
 def CountryCodeValidation(form, field):
@@ -457,6 +457,14 @@ def SearchQueryRequired(form, field):
 def DefaultSelectValidation(form, field):
     if field.data == 'default':
         raise wtforms.validators.ValidationError('Please select a valid option from the list.')
+
+
+def TaxRegisteredValidation(form, field):
+    if form.billing_country.data == 'GB':
+        form.not_tax_registered.data = False
+    elif not len(field.data) > 0 and eu_country(form.billing_country.data):
+        if not form.not_tax_registered.data:
+            raise wtforms.validators.ValidationError('You must provide your tax number if you are tax registered.')
 
 # ==== End Validators ====
 
