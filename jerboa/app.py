@@ -247,7 +247,7 @@ def parse_component_config(resource_config, app_registry, default_login=False, d
                 if prefixed:
                     resource_routes_prefixed.append(method_route)
                 else:
-                    AppRegistry.routes.append(method_route)
+                    app_registry.routes.append(method_route)
             except TypeError:
                 # The value was set explicitly to None, so we skip the rotue generation
                 pass
