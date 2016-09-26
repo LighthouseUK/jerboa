@@ -544,7 +544,8 @@ by using the signals that get send out by the exception handlers.
 """
 
 
-# add_routes(app_instance=frontend, route_list=get_component_routes())
+CUSTOM_DISPATCHER_REQUEST_INIT_HOOK = signal('request_init_hook')
+CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK = signal('response_init_hook')
 CUSTOM_DISPATCHER_PRE_HOOK = signal('pre_dispatch_request_hook')
 CUSTOM_DISPATCHER_POST_HOOK = signal('post_dispatch_request_hook')
 CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK = signal('pre_process_response_hook')
@@ -668,6 +669,25 @@ def custom_adapter(router, handler):
 
 
 def custom_dispatcher(router, request, response):
+    try:
+        rv = router.match(request)
+    except exc.HTTPMethodNotAllowed, e:
+        logging.exception('HTTP method not allowed for route')
+        return _handle_app_exception(exception=e, request=request, response=response, router=router)
+
+    if rv is None:
+        logging.exception('Failed to match route.')
+        _handle_404(response=response, router=router)
+
+    request.route, request.route_args, request.route_kwargs = rv
+    # We add this before passing response to the pre_process hook. That way any connected functions can set response
+    # values without having to check it they can or not.
+    response.raw = ScratchSpace()
+
+    # Use this hook to set a custom namespace; set request.namespace
+    CUSTOM_DISPATCHER_REQUEST_INIT_HOOK.send(router, request=request)
+    CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK.send(router, response=response)
+
     current_namespace = namespace_manager.get_namespace()
     try:
         target_namespace = request.namespace
@@ -677,21 +697,6 @@ def custom_dispatcher(router, request, response):
     try:
         if target_namespace != 'default':
             namespace_manager.set_namespace(target_namespace)
-
-        try:
-            rv = router.match(request)
-        except exc.HTTPMethodNotAllowed, e:
-            logging.exception('HTTP method not allowed for route')
-            return _handle_app_exception(exception=e, request=request, response=response, router=router)
-
-        if rv is None:
-            logging.exception('Failed to match route.')
-            _handle_404(response=response, router=router)
-
-        request.route, request.route_args, request.route_kwargs = rv
-        # We add this before passing response to the pre_process hook. That way any connected functions can set response
-        # values without having to check it they can or not.
-        response.raw = ScratchSpace()
 
         try:
             CUSTOM_DISPATCHER_PRE_HOOK.send(router, request=request, response=response)
@@ -890,7 +895,9 @@ class BaseHandlerMixin(object):
             return str(self.set_url_query_parameter(self._get_route(route_name=route_name), kwargs))
 
     def set_redirect_url(self, response, **kwargs):
-        response.redirect_to = self.get_route_url(response=response, **kwargs)
+        # Be careful with this. Anything in kwargs will be appended as a GET param, apart from the named args to
+        # 'get_route_url.
+        response.redirect_to = self.get_route_url(**kwargs)
 
     set_url_query_parameter = staticmethod(set_url_query_parameter)
 
