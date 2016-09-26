@@ -5,7 +5,7 @@ import inspect
 import webapp2
 from webob import exc
 from blinker import signal
-from datetime import datetime
+from datetime import datetime, timedelta
 from urlparse import urlparse
 from google.appengine.api import namespace_manager
 from webapp2_extras.routes import RedirectRoute, PathPrefixRoute, MultiRoute
@@ -433,6 +433,7 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'type': StandardFormHandler,
             'form': form,
             'success_route': 'default',
+            'success_message': 'Successfully created {}'.format(resource_name.title())
         },
     }
     create['method'].update(method_customizations['create']['method'])
@@ -464,6 +465,7 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'type': StandardFormHandler,
             'form': form,
             'success_route': 'default',
+            'success_message': 'Successfully updated {}'.format(resource_name.title())
         },
     }
     update['method'].update(method_customizations['update']['method'])
@@ -480,6 +482,7 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
             'type': StandardFormHandler,
             'form': delete_form,
             'success_route': 'default',
+            'success_message': 'Successfully deleted {}'.format(resource_name.title())
         },
     }
     delete['method'].update(method_customizations['delete']['method'])
@@ -966,13 +969,13 @@ class BaseFormHandler(BaseHandlerMixin):
         }
 
 
-def default_form_csrf_config(sender, request, response, form_config):
-    form_config['csrf_context'] = request.secrets.getbyteliteral('csrf_secret')
-    form_config['csrf_secret'] = request.environ['beaker.session']
-    form_config['csrf_time_limit'] = datetime.timedelta(minutes=request.secrets.getint('csrf_time_limit'))
+def default_form_csrf_config(sender, request, response, form_config, **kwargs):
+    form_config['csrf_context'] = request.environ['beaker.session']
+    form_config['csrf_secret'] = request.secrets.getbyteliteral('csrf_secret')
+    form_config['csrf_time_limit'] = timedelta(minutes=request.secrets.getint('csrf_time_limit'))
 
 
-def default_form_recaptcha_config(sender, request, response, form_config):
+def default_form_recaptcha_config(sender, request, response, form_config, **kwargs):
     form_config['recaptcha_site_key'] = request.secrets.get('recaptcha_site_key')
     form_config['recaptcha_site_secret'] = request.secrets.get('recaptcha_site_secret')
 
@@ -1034,7 +1037,7 @@ class StandardFormHandler(BaseFormHandler):
     UI_FAILED_HOOK_NAME = 'ui_failed'
 
     def __init__(self, form=PlaceholderForm, success_message=None, failure_message=None, suppress_success_status=False,
-                 force_ui_get_data=False, force_callback_get_data=False, **kwargs):
+                 force_ui_get_data=False, force_callback_get_data=False, enable_default_csrf=True, **kwargs):
         super(StandardFormHandler, self).__init__(form=form, **kwargs)
 
         self.force_ui_get_data = force_ui_get_data
@@ -1063,6 +1066,8 @@ class StandardFormHandler(BaseFormHandler):
 
         signal(u'{}_http_get'.format(self.code_name)).connect(self.ui_handler)
         signal(u'{}_http_post'.format(self.code_name)).connect(self.callback_handler)
+        if enable_default_csrf:
+            self.form_config_hook.connect(default_form_csrf_config, sender=self)
 
     @property
     def _ui_hook_enabled(self):
