@@ -133,6 +133,7 @@ default_method_definition = {
         'login_required': False,
         'prefix_route': True,
         'content_type': 'text/html',
+        'remove_form_uid': False,
     },
     'route': {
         'template': template,
@@ -207,6 +208,7 @@ def parse_component_config(resource_config, app_registry, default_login=False, d
                 'login_required': default_login,
                 'prefix_route': True,
                 'content_type': 'text/html',
+                'remove_form_uid': False,
             }
 
             try:
@@ -249,7 +251,7 @@ def parse_component_config(resource_config, app_registry, default_login=False, d
                 else:
                     app_registry.routes.append(method_route)
             except TypeError:
-                # The value was set explicitly to None, so we skip the rotue generation
+                # The value was set explicitly to None, so we skip the route generation
                 pass
             else:
                 # The dict update works so we generate the route with the updated values
@@ -280,6 +282,11 @@ def parse_component_config(resource_config, app_registry, default_login=False, d
             else:
                 # The dict update works so we generate the handler with the updated values
                 app_registry.handlers[handler_name] = generate_handler(handler_config=default_handler_config)
+
+                if default_method_config['remove_form_uid']:
+                    # A very common pattern for CRUD will be to have one form and remove the UID field when creating.
+                    app_registry.handlers[handler_name].customize_form_hook.connect(remove_form_uid,
+                                                                                    sender=app_registry.handlers[handler_name])
 
         if resource_routes_prefixed:
             # By adding the prefixed routes in one go we group them all together as a single entry. This can give a
@@ -427,6 +434,7 @@ def crud_method_definition_generator(resource_name, form=PlaceholderForm, delete
         'method': {
             'title': 'Create {}'.format(resource_name.title()),
             'code_name': 'create',
+            'remove_form_uid': True,
         },
         'route': {},
         'handler': {
@@ -985,6 +993,10 @@ def default_form_csrf_config(sender, request, response, form_config, **kwargs):
 def default_form_recaptcha_config(sender, request, response, form_config, **kwargs):
     form_config['recaptcha_site_key'] = request.secrets.get('recaptcha_site_key')
     form_config['recaptcha_site_secret'] = request.secrets.get('recaptcha_site_secret')
+
+
+def remove_form_uid(handler, request, response, form_instance, hook_name):
+    del form_instance.uid
 
 
 class StandardUIHandler(BaseHandlerMixin):
