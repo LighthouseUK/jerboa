@@ -798,12 +798,16 @@ class StatusManager(object):
     DEFAULT_FAILURE_CODE = '2'
     DEFAULT_FORM_FAILURE_CODE = '3'
     DEFAULT_USER_LOGGED_IN_CODE = '4'
+    DEFAULT_MISSING_KEY = '5'
+    DEFAULT_INVALID_KEY = '6'
 
     statuses = {
         DEFAULT_SUCCESS_CODE: (u'Successfully completed operation', 'success'),
         DEFAULT_FAILURE_CODE: (u'Failed to complete operation.', 'alert'),
         DEFAULT_FORM_FAILURE_CODE: (u'Please correct the errors on the form below.', 'alert'),
         DEFAULT_USER_LOGGED_IN_CODE: (u'You can\'t visit that page as a logged in user.', 'alert'),
+        DEFAULT_MISSING_KEY: (u'You must supply a key.', 'alert'),
+        DEFAULT_INVALID_KEY: (u'You must supply a valid key.', 'alert'),
     }
 
     @classmethod
@@ -942,10 +946,8 @@ class BaseFormHandler(BaseHandlerMixin):
 
         self.success_status_code = self.status_manager.DEFAULT_SUCCESS_CODE
         self.failure_status_code = self.status_manager.DEFAULT_FORM_FAILURE_CODE
-        self.key_required_status_code = self.status_manager.add_status(
-            message='You must supply a {} key.'.format(self.title), status_type='alert')
-        self.key_invalid_status_code = self.status_manager.add_status(
-            message='You must supply a valid {} key.'.format(self.title), status_type='alert')
+        self.key_required_status_code = self.status_manager.DEFAULT_MISSING_KEY
+        self.key_invalid_status_code = self.status_manager.DEFAULT_INVALID_KEY
 
         self.validation_trigger_codes = [self.failure_status_code]
         self.form = form
@@ -1152,7 +1154,7 @@ class StandardFormHandler(BaseFormHandler):
         else:
             self.parse_status_code(request=request, response=response)
             validate = response.raw.status_code in self.validation_trigger_codes
-            formdata = request.GET if validate else None
+            formdata = request.GET if validate or self.force_ui_get_data else None
 
             form_config = self._build_form_config(request=request, action_url=self.get_route_url(request=request, route_name=self.code_name), formdata=formdata)
 
@@ -1190,7 +1192,9 @@ class StandardFormHandler(BaseFormHandler):
         :param response:
         :return:
         """
-        form_config = self._build_form_config(request=request)
+        formdata = request.GET if self.force_callback_get_data else None
+
+        form_config = self._build_form_config(request=request, formdata=formdata)
 
         if self._form_config_hook_enabled:
             self.form_config_hook.send(self, request=request, response=response, form_config=form_config, hook_name=self.FORM_CONFIG_HOOK_NAME)
