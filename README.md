@@ -56,7 +56,7 @@ we can simply add a new dict key without breaking the current config generators 
 TODO: mention defaults and their behaviour e.g. page_templates
 
 ## Renderers
-Jerboa uses jinja2 for template rendering. It works well with App Engine and it has an easy to learn syntax, making
+Jerboa uses jinja2 for template rendering by default. It works well with App Engine and it has an easy to learn syntax, making
 it ideal for use by designers who perhaps aren't familiar with coding/python. 
 
 A minimal config for jinja2 might look like the following:
@@ -95,6 +95,7 @@ jinja_config = {
 ```
 With the exception of the `type` key, these are all standard jinja2 configuration options. `type` refers to a jerboa 
 renderer class (found in `renderers.py`). You can extend these or create your own.
+If you do create your own, you obviously won't need to use the jinja2 config options.
 
 For more information about how to configure jinja2, refer to the docs at (http://jinja.pocoo.org/docs/dev/api/#basics)
 
@@ -169,4 +170,4 @@ handlers:
 ```
 
 If you run your project you should have an app that responds to GET requests for `/company/overview`. Assuming you
-have also setup a `[THEME_DIR]/company/overview.html` template you should see the page rendered.
+have also setup a `[THEME_DIR]/company/overview.html` template, you should see the page rendered.
