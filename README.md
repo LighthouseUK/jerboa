@@ -51,8 +51,8 @@ resource_definitions = {
 
 ## Method Config
 
-Key | Default Value | Type | Description
---- | --- | ---
+Key | Default Value | Type | Description 
+--- | --- | --- | --- 
 **title** | None | string &#124; None | *optional* The method title. This can be used in page templates
 **code_name** | n/a | string | *required* The method code name e.g. `read`. This is combined with the resource name to create the handler name e.g. `company_read`.
 **template_format** | 'html' | string &#124; None | *optional* The page template format (the file extension). If you don't explicitly set a page template, and you don't set `template_format` to `None`, then we use this to generate `page_template`. If you do explicitly set `page_template` then this value is ignored.
