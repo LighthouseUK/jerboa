@@ -49,6 +49,20 @@ resource_definitions = {
 }
 ```
 
+## Method Config
+
+Key | Default Value | Type | Description
+--- | --- | ---
+**title** | None | string &#124; None | *optional* The method title. This can be used in page templates
+**code_name** | n/a | string | *required* The method code name e.g. `read`. This is combined with the resource name to create the handler name e.g. `company_read`.
+**template_format** | 'html' | string &#124; None | *optional* The page template format (the file extension). If you don't explicitly set a page template, and you don't set `template_format` to `None`, then we use this to generate `page_template`. If you do explicitly set `page_template` then this value is ignored.
+**page_template** | '' | string &#124; None | *optional* The page template that the renderer uses. If explicitly set to `None` then we won't set the template automatically. If set to `''` then we will generate the template path based on the resource name and `code_name` e.g. `company/read.html`
+**login_required** | False | boolean | *optional* Simple flag that can be used when processing requests. It doesn't actually do anything by itself.
+**prefix_route** | True | boolean | *optional* By default, when creating the method routes for a resource we will use `PathPrefixRoute` from `webapp2_extras.routes`. This will group all the routes for a resource and prefix them with the resource name e.g. `/company/read`. This can improve performance if you have a lot of routes as it makes matching faster. Of course sometimes this is not desirable e.g. `/robots.txt`, so you can disable it by setting this config option to `False`
+**content_type** | 'text/html' | string | *required* Any valid HTTP `content-type` header mime type.
+**remove_form_uid** | False | boolean | *optional* Generally, you will have one form definition that will be used for both `create` and `update` operations. Usually the only difference between them is a lack of a `UID` field when creating. If this config is set to `True` then we will automatically attempt to remove a `uid` field from the handler form. Part of the method config instead of the handler config as you might want to change this per request.
+
+
 You might be wondering why the resources are defined as a dict, instead of just directly specifying the list of 
 methods. It allows for easy refactoring in the future. If we want to add something else to the resource definition
 we can simply add a new dict key without breaking the current config generators and parsers.
