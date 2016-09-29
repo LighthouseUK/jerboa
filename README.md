@@ -93,7 +93,7 @@ base.html
 
     <link href="{{ main_css }}" rel="stylesheet" />
 
-	<title>{% block page_header_title %}{{ app_info.title }}{{ ' | ' + gettext(route_title) if route_title else '' }}{% endblock %}</title>
+	<title>{% block page_header_title %}{{ app_info.title }}{{ ' | ' + route_title if route_title else '' }}{% endblock %}</title>
 
 </head>
 <body>
