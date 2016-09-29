@@ -9,6 +9,114 @@ of code is usually for request handling and form handling, and is usually boiler
 With Jerboa, you can get started simply by specifying some resource method definitions. The request routing and form
 handling will be taken care of for you.
 
+# Show Me The Code!
+
+Project structure:
+```
+.
++-- app.yaml
++-- main.py
++-- jerboa
++-- webapp2
++-- static_assets
+|   +-- themes
+|   |   +-- example
+|   |   |   +-- css
+|   |   |   |   +-- app.min.css
+|   |   |   +-- js
+|   |   |   +-- templates
+|   |   |   |   +-- company
+|   |   |   |   |   +-- overview.html
+|   |   |   |   +-- base.html
+```
+
+main.py
+```python
+# main.py
+from jerboa.app import JerboaApp
+from jerboa.renderers import Jinja2Renderer
+import webapp2
+
+resource_definitions = {
+    'company': {
+        'method_definitions': [
+            {
+                'method': {
+                    'title': 'Company Overview',
+                    'code_name': 'overview',
+                },
+            },
+        ],
+    }
+}
+
+jinja_config = {
+    'type': Jinja2Renderer,
+    'environment_args': {
+        'extensions': ['jinja2.ext.autoescape', 'jinja2.ext.with_', 'jinja2.ext.i18n', 'jinja2.ext.do'],
+        'autoescape': False,
+    },
+    'theme_base_template_path': 'static_assets/themes/example/templates',
+    'enable_i18n': False,
+    'global_vars': {
+        'app_info': {
+            'title': 'Example App',
+        },
+        'theme': 'example',
+        'base_url': '/themes/example',
+        'css_url': '/themes/example/css',
+        'css_ext': '.min.css',
+        'js_url': '/themes/example/js',
+        'js_ext': '.min.js',
+        'main_css': 'app.min.css',
+        'base_layout': 'base.html',
+        'uri_for': webapp2.uri_for,
+    },
+    'filters': {
+        # Add and extra filters here
+    },
+    'tests': {
+        # Add any extra tests here
+    },
+}
+
+my_app = JerboaApp(resource_config=resource_definitions, renderer_config=jinja_config)
+```
+
+base.html
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <link href="{{ main_css }}" rel="stylesheet" />
+
+	<title>{% block page_header_title %}{{ app_info.title }}{{ ' | ' + gettext(route_title) if route_title else '' }}{% endblock %}</title>
+
+</head>
+<body>
+    {% block content %}
+    <h1>{% block title %}{{ route_title if route_title is defined }}{% endblock title %}</h1>
+    <p>Here is some content. You can do pretty much whatever you like here</p>
+    {% endblock content %}
+</body>
+</html>
+```
+
+overview.html
+```html
+{% extends base_layout %}
+
+    {% block content %}
+    <h1>Company Overview</h1>
+    <p>This is the company overview page</p>
+    {% endblock content %}
+```
+
+The code above show the basic steps to setup an app that will respond to requests to `/company/overview`.
+
 # Setup
 
 ## Resource Definitions
@@ -80,6 +188,10 @@ Key | Default Value | Type | Description
 **failure_route** | `None` | string | *optional* A webapp2 route name e.g. `dashboard_overview`. By default the handler will set this to be itself. Mainly used by form handling methods, but may also be used if you trigger an exception.
 
 
+#### StandardUIHandler
+Extends `BaseHandlerMixin` and therefore accepts it's arguments. It does not accept any additional arguments
+
+
 #### BaseFormHandler
 Extends `BaseHandlerMixin` and therefore accepts it's arguments as well
 
@@ -88,8 +200,25 @@ Key | Default Value | Type | Description
 **form** | n/a | WTForms.BaseForm | *required* A WTForms class (**not** an instance) to be used by the form handler.
 **form_method** | `post` | string | *optional* HTTP method for the form submission. Either `get` or `post`.
 **filter_params** | `None` | list of strings | *optional* If a form fails to validate then we redirect back to it with the form data as `GET` parameters. This config gives you the option to remove some of the form data. A good example would be to remove sensitive data e.g. passwords. Simply provide a list of form fields e.g. `['password']`.
-**validation_trigger_codes** | `None` | list of strings | *optional* By default the handler form will be validated if the form error code is in the GET request. You may supply additional codes that will trigger the validation e.g. `['10']`. The status codes are returned by the StatusManager class when you add a status message class.
+**validation_trigger_codes** | `None` | list of strings | *optional* By default the handler form will be validated if the form error code -- `03` -- is in the GET request. You may supply additional codes that will trigger the validation e.g. `['10']`. The status codes are returned by the StatusManager class when you add a status message class.
 
+
+#### StandardFormHandler
+Extends `BaseFormHandler`, which extends `BaseHandlerMixin`; accepts both sets of arguments.
+
+Key | Default Value | Type | Description 
+--- | --- | --- | --- 
+**form** | PlaceholderForm | jerboa.BaseForm | *optional* A WTForms class (**not** an instance). By default this handler provides a placeholder form. The placeholder form has a single checkbox field, which must be checked in order to validate. This allows you to test form handling without having to create a form up front.
+**success_message** | `None` | string | *optional* If provided, the handler will register a new status message and use it when a form successfully validates.
+**failure_message** | `None` | string | *optional* If provided, the handler will register a new status message and use it when a form fails to validate.
+**suppress_success_status** | `False` | boolean | *optional* It may be helpful to suppress success messages. If you set this to `True` then the handler will not append a status code when redirecting on success.
+**force_ui_get_data** | `False` | boolean | *optional* If set to `True` then the form will render with any matching `GET` parameters. This can be useful when chaining forms together. 
+**force_callback_get_data** | `False` | boolean | *optional* If set to `True` then the form will be parsed with any matching `GET` parameters. This can be useful when chaining forms together. 
+**enable_default_csrf** | `True` | boolean | *optional* If set to `True` then the handler will configure the default implementation of the form CSRF protection. For this to work a request will need three values: `csrf_context`, `csrf_secret`, `csrf_time_limit`.
+
+
+TODO: detail the default CSRF setup and link to `enable_default_csrf` above.
+TODO: detail the search handlers
 
 
 ## Renderers
