@@ -765,3 +765,42 @@ class GAEFilterOptions(BaseFilterOptionsForm):
     def filter_expressions(self):
         filter_expressions = [(field, value) for field, value in self.data.iteritems() if value and value != DEFAULT_NONE_VALUE]
         return filter_expressions or None
+
+
+class UserForm(BaseModelForm, NameMixin, UsernameMixin, EmailAddressMixin, ConfirmPasswordMixin,
+               LanguagePreferenceMixin, RecaptchaMixin):
+    pass
+
+
+# Example user forms
+class UserSortOptions(GAESortOptions):
+    sort_by = wtforms.fields.SelectField(i18n.lazy_gettext(u'Sort By'),
+                                         [],
+                                         choices=(
+                                             (u'NONE', i18n.lazy_gettext(u'None')),
+                                             (u'username', i18n.lazy_gettext(u'Username')),
+                                             (u'first_name', i18n.lazy_gettext(u'First Name')),
+                                             (u'last_name', i18n.lazy_gettext(u'Last Name')),
+                                             (u'email_address', i18n.lazy_gettext(u'Primary Email')),
+                                             (u'recovery_email_address', i18n.lazy_gettext(u'Recovery Email')),
+                                             (u'language_preference', i18n.lazy_gettext(u'Language')),
+                                             (u'created', i18n.lazy_gettext(u'Registered')),
+                                             (u'updated', i18n.lazy_gettext(u'Updated')),
+                                         ),
+                                         default=DEFAULT_NONE_VALUE)
+
+
+LANG_LIST = [(DEFAULT_NONE_VALUE, u'--')]
+LANG_LIST.extend(list(STATIC_LANGUAGE_CODES_TUPLE))
+LANG_TUPLE = tuple(LANG_LIST)
+
+
+class UserFilterOptions(GAEFilterOptions):
+    language_preference = wtforms.fields.SelectField(i18n.lazy_gettext(u'Preferred Language'), [
+        LanguageCodeValidationWithDefaultSupport,
+    ], choices=LANG_TUPLE, default=DEFAULT_NONE_VALUE)
+
+
+class UserSearchForm(BaseSearchForm, GAESearchCursorMixin):
+    sort_options = FormField(UserSortOptions)
+    filter_options = FormField(UserFilterOptions)

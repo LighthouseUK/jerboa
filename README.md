@@ -162,8 +162,6 @@ You might be wondering why the resources are defined as a dict, instead of just 
 methods. It allows for easy refactoring in the future. If we want to add something else to the resource definition
 we can simply add a new dict key without breaking the current config generators and parsers.
 
-TODO: mention defaults and their behaviour e.g. page_templates
-
 ### Method Config
 
 Key | Default Value | Type | Description 
