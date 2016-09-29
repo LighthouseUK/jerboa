@@ -1,7 +1,5 @@
 # Jerboa
-TODO: update readme with proper description and tutorial
-
-This is still an alpha release. Feel free to use it but please report any problems.
+**This is still an alpha release. Feel free to use it but please report any problems.**
 
 Jerboa is a set of tools to extend the webapp2 framework. The target environment is Google App Engine, but the code 
 should run anywhere.
@@ -11,6 +9,8 @@ of code is usually for request handling and form handling, and is usually boiler
 
 With Jerboa, you can get started simply by specifying some resource method definitions. The request routing and form
 handling will be taken care of for you.
+
+TODO: update readme with proper description and tutorial
 
 # Show Me The Code!
 
