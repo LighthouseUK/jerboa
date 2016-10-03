@@ -883,9 +883,8 @@ class BaseHandlerMixin(object):
     route names in the config and then parse them on demand (we cache the result so the overhead is minimal).
 
     """
-    def __init__(self, code_name, title, success_route=None, failure_route=None, **kwargs):
+    def __init__(self, code_name, success_route=None, failure_route=None, **kwargs):
         self.code_name = code_name
-        self.title = title
         self._route_cache = {}
         self.status_manager = StatusManager
 
@@ -967,16 +966,10 @@ class BaseHandlerMixin(object):
 
 
 class BaseFormHandler(BaseHandlerMixin):
-    def __init__(self, form, form_method='post', request_config_keys=None, filter_params=None,
-                 validation_trigger_codes=None, **kwargs):
+    def __init__(self, form, form_method='post', filter_params=None, validation_trigger_codes=None, **kwargs):
         super(BaseFormHandler, self).__init__(**kwargs)
 
         self.filter_params = filter_params
-
-        if request_config_keys is None:
-            self.request_config_keys = ['csrf_config']
-        else:
-            self.request_config_keys = request_config_keys
 
         self.success_status_code = self.status_manager.DEFAULT_SUCCESS_CODE
         self.failure_status_code = self.status_manager.DEFAULT_FORM_FAILURE_CODE
