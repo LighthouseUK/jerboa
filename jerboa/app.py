@@ -676,7 +676,7 @@ def custom_adapter(router, handler):
         return adapter(handler)
 
 
-def custom_dispatcher(router, request, response):
+def custom_dispatcher(router, request, response, app_instance):
     try:
         rv = router.match(request)
     except exc.HTTPMethodNotAllowed, e:
@@ -693,8 +693,8 @@ def custom_dispatcher(router, request, response):
     response.raw = ScratchSpace()
 
     # Use this hook to set a custom namespace; set request.namespace
-    CUSTOM_DISPATCHER_REQUEST_INIT_HOOK.send(router, request=request)
-    CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK.send(router, response=response)
+    CUSTOM_DISPATCHER_REQUEST_INIT_HOOK.send(router, request=request, app_instance=app_instance)
+    CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK.send(router, response=response, app_instance=app_instance)
 
     current_namespace = namespace_manager.get_namespace()
     try:
@@ -707,8 +707,8 @@ def custom_dispatcher(router, request, response):
             namespace_manager.set_namespace(target_namespace)
 
         try:
-            CUSTOM_DISPATCHER_PRE_HOOK.send(router, request=request, response=response)
-            CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.send(router, request=request, response=response)
+            CUSTOM_DISPATCHER_PRE_HOOK.send(router, request=request, response=response, app_instance=app_instance)
+            CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.send(router, request=request, response=response, app_instance=app_instance)
 
             router.default_dispatcher(request, response)
         except ApplicationError, e:
@@ -725,8 +725,8 @@ def custom_dispatcher(router, request, response):
             _handle_exception(exception=e, request=request, response=response, router=router)
         else:
             # We don't want to trigger this hook unless the request was successful.
-            CUSTOM_DISPATCHER_POST_HOOK.send(router, request=request, response=response)
-            CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.send(router, request=request, response=response)
+            CUSTOM_DISPATCHER_POST_HOOK.send(router, request=request, response=response, app_instance=app_instance)
+            CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.send(router, request=request, response=response, app_instance=app_instance)
 
     finally:
         namespace_manager.set_namespace(current_namespace)
@@ -741,13 +741,7 @@ to invoke a renderer during the post processing stage of a request.
 """
 
 
-def default_post_request_hook(sender, request, response):
-    if request.method == 'GET' and response.status_int == 200:
-        AppRegistry.renderers['default'].render(template_name=request.route.method_config['page_template'], response=response)
-
-
 class JerboaApp(webapp2.WSGIApplication):
-    # TODO: must set request.namespace in pre_request_dispatch
     def __init__(self, resource_config, renderer_config=None, default_login=True, add_default_route=True, debug=None, webapp2_config=None):
         if debug is None:
             try:
@@ -766,7 +760,6 @@ class JerboaApp(webapp2.WSGIApplication):
         self.router.set_adapter(custom_adapter)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=self.router)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(custom_response_headers, sender=self.router)
-        CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.connect(default_post_request_hook, sender=self.router)
 
         if renderer_config is not None:
             renderer_type = renderer_config['type']
@@ -784,6 +777,47 @@ class JerboaApp(webapp2.WSGIApplication):
     parse_component_config = staticmethod(parse_component_config)
 
     add_routes = add_routes
+
+    def __call__(self, environ, start_response):
+        """Called by WSGI when a request comes in.
+
+        Modified version of the default webapp2 method. We send the app instance to the
+        dispatch method so that we can properly use signals.
+
+        :param environ:
+            A WSGI environment.
+        :param start_response:
+            A callable accepting a status code, a list of headers and an
+            optional exception context to start the response.
+        :returns:
+            An iterable with the response to return to the client.
+        """
+        with self.request_context_class(self, environ) as (request, response):
+            try:
+                if request.method not in self.allowed_methods:
+                    # 501 Not Implemented.
+                    raise exc.HTTPNotImplemented()
+
+                rv = self.router.dispatch(request, response, app_instance=self)
+                if rv is not None:
+                    response = rv
+            except Exception, e:
+                try:
+                    # Try to handle it with a custom error handler.
+                    rv = self.handle_exception(request, response, e)
+                    if rv is not None:
+                        response = rv
+                except webapp2.HTTPException, e:
+                    # Use the HTTP exception as response.
+                    response = e
+                except Exception, e:
+                    # Error wasn't handled so we have nothing else to do.
+                    response = self._internal_error(e)
+
+            try:
+                return response(environ, start_response)
+            except Exception, e:
+                return self._internal_error(e)(environ, start_response)
 
 
 """
