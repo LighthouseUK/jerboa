@@ -1,9 +1,8 @@
 import os
-import codecs
 from blinker import signal
-from .config import CustomConfigParser
+from .config import NoSectionError, NoOptionError, load_config
 from beaker.middleware import SessionMiddleware
-from .app import JerboaApp, CUSTOM_DISPATCHER_REQUEST_INIT_HOOK, CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK
+from .app import JerboaApp, CUSTOM_DISPATCHER_REQUEST_INIT_HOOK, CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK, CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK, RENDERER_CONFIG_HOOK
 
 
 def request_init(sender, request, app_instance):
@@ -14,13 +13,17 @@ def request_init(sender, request, app_instance):
     # because we need to set the namespace before invoking any API methods.
 
 
+def response_init(sender, response, app_instance):
+    response.default_renderer = app_instance.app_registry.renderers['default']
+
+
 def post_request_hook(sender, request, response, **kwargs):
     request.environ['beaker.session'].save()
 
 
 def default_post_request_hook(sender, request, response, app_instance):
     if request.method == 'GET' and response.status_int == 200:
-        app_instance.app_registry.renderers['default'].render(template_name=request.route.method_config['page_template'], response=response)
+        response.default_renderer.render(template_name=request.route.method_config['page_template'], response=response)
 
 
 # This is a useful little handler that allows you to place breakpoints for debugging form errors.
@@ -34,7 +37,6 @@ class SettingsSupportedApp(JerboaApp):
 
     """
     def __init__(self, config_file_path, **kwargs):
-        super(SettingsSupportedApp, self).__init__(**kwargs)
         try:
             if os.environ['SERVER_SOFTWARE'].startswith('Google'):
                 platform = 'Production'
@@ -50,16 +52,100 @@ class SettingsSupportedApp(JerboaApp):
         if self.debug:
             signal('form_error').connect(form_debug)
 
-        settings = CustomConfigParser(platform=platform, allow_no_value=True)
+        self.app_settings = load_config(config_file_path=config_file_path, platform=platform)
 
-        with codecs.open(config_file_path, 'r', encoding='utf-8') as f:
-            settings.readfp(f)
-        settings.read([os.path.join(os.path.dirname(__file__), found_file) for found_file in os.listdir(os.path.dirname(__file__)) if found_file.endswith('.ini')])
-
-        self.app_settings = settings
+        # We need to setup the config parser before calling init on super; some receivers may depend on app_settings
+        # being available
+        super(SettingsSupportedApp, self).__init__(**kwargs)
 
         CUSTOM_DISPATCHER_REQUEST_INIT_HOOK.connect(request_init, sender=self.router)
+        CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK.connect(response_init, sender=self.router)
         CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.connect(default_post_request_hook, sender=self.router)
+
+
+def default_renderer_config_loader(app_instance, renderer_config):
+    try:
+        renderer_config['environment_args']['extensions'] = app_instance.app_settings.getlist('jinja2_extensions')
+    except (NoSectionError, NoOptionError):
+        renderer_config['environment_args']['extensions'] = 'jinja2.ext.autoescape,jinja2.ext.with_,jinja2.ext.i18n,jinja2.ext.do'
+
+    try:
+        renderer_config['environment_args']['autoescape'] = app_instance.app_settings.getboolean('jinja2_env_autoescape')
+    except (NoSectionError, NoOptionError):
+        renderer_config['environment_args']['autoescape'] = False
+
+    try:
+        renderer_config['enable_i18n'] = app_instance.app_settings.getboolean('enable_i18n')
+    except (NoSectionError, NoOptionError):
+        renderer_config['enable_i18n'] = False
+
+    try:
+        renderer_config['theme_base_template_path'] = app_instance.app_settings.getlist('theme_base_template_path')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['theme'] = app_instance.app_settings.get('theme')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['base_url'] = app_instance.app_settings.get('theme_url')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['css_url'] = app_instance.app_settings.get('theme_css_url')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['js_url'] = app_instance.app_settings.get('theme_js_url')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['common_assets_url'] = app_instance.app_settings.get('theme_common_assets_url')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['css_ext'] = app_instance.app_settings.get('css_ext')
+    except (NoSectionError, NoOptionError):
+        renderer_config['global_vars']['css_ext'] = '.css'
+
+    try:
+        renderer_config['global_vars']['js_ext'] = app_instance.app_settings.get('js_ext')
+    except (NoSectionError, NoOptionError):
+        renderer_config['global_vars']['js_ext'] = '.js'
+
+    try:
+        renderer_config['global_vars']['main_css'] = app_instance.app_settings.get('theme_main_css_url')
+    except (NoSectionError, NoOptionError):
+        renderer_config['global_vars']['main_css'] = 'app'
+
+    try:
+        renderer_config['global_vars']['base_layout'] = app_instance.app_settings.get('theme_base_layout')
+    except (NoSectionError, NoOptionError):
+        renderer_config['global_vars']['base_layout'] = 'base.html'
+
+    try:
+        renderer_config['global_vars']['home_route'] = app_instance.app_settings.get('home_route')
+    except (NoSectionError, NoOptionError):
+        renderer_config['global_vars']['home_route'] = 'default'
+
+    if 'app_info' not in renderer_config['global_vars']:
+        renderer_config['global_vars']['app_info'] = {}
+
+    try:
+        renderer_config['global_vars']['app_info']['app_name'] = app_instance.app_settings.get('app_name')
+    except (NoSectionError, NoOptionError):
+        pass
+
+    try:
+        renderer_config['global_vars']['app_info']['title'] = app_instance.app_settings.get('title')
+    except (NoSectionError, NoOptionError):
+        pass
 
 
 class FoundationApp(SessionMiddleware):
@@ -67,8 +153,10 @@ class FoundationApp(SessionMiddleware):
     FoundationApp builds upon JerboaApp to add in session management and config file parsing.
 
     """
-    def __init__(self, config_file_path, resource_config, renderer_config=None, default_login=True, add_default_route=True, debug=None, webapp2_config=None, **kwargs):
-        app = SettingsSupportedApp(config_file_path=config_file_path, resource_config=resource_config, renderer_config=renderer_config, default_login=default_login, add_default_route=add_default_route, debug=debug, webapp2_config=webapp2_config)
+    def __init__(self, config_file_path, resource_config, default_login=True, add_default_route=True, debug=None, webapp2_config=None, **kwargs):
+        RENDERER_CONFIG_HOOK.connect(default_renderer_config_loader, sender=self)
+
+        app = SettingsSupportedApp(config_file_path=config_file_path, resource_config=resource_config, default_login=default_login, add_default_route=add_default_route, debug=debug, webapp2_config=webapp2_config)
 
         session_opts = {
             'session.type': app.app_settings.get('session_type'),
@@ -79,4 +167,4 @@ class FoundationApp(SessionMiddleware):
             'session.httponly': True,
         }
 
-        super(FoundationApp, self).__init__(wrap_app=app, **kwargs)
+        super(FoundationApp, self).__init__(wrap_app=app, config=session_opts, **kwargs)

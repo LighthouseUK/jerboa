@@ -11,6 +11,7 @@ from google.appengine.api import namespace_manager
 from webapp2_extras.routes import RedirectRoute, PathPrefixRoute, MultiRoute
 from .forms import PlaceholderForm, BaseSearchForm, DeleteModelForm
 from .utils import decode_unicode_request_params, filter_unwanted_params, set_url_query_parameter
+from .renderers import Jinja2Renderer
 
 
 __author__ = 'Matt'
@@ -740,9 +741,11 @@ app. It takes care of the config parsing, adds the routes, and sets up the custo
 to invoke a renderer during the post processing stage of a request.
 """
 
+RENDERER_CONFIG_HOOK = signal('renderer_config_hook')
+
 
 class JerboaApp(webapp2.WSGIApplication):
-    def __init__(self, resource_config, renderer_config=None, default_login=True, add_default_route=True, debug=None, webapp2_config=None):
+    def __init__(self, resource_config, default_login=True, add_default_route=True, debug=None, webapp2_config=None):
         if debug is None:
             try:
                 debug = os.environ['SERVER_SOFTWARE'].startswith('Dev')
@@ -761,11 +764,21 @@ class JerboaApp(webapp2.WSGIApplication):
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=self.router)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(custom_response_headers, sender=self.router)
 
-        if renderer_config is not None:
-            renderer_type = renderer_config['type']
-            del renderer_config['type']
+        default_renderer_config = {
+            'type': Jinja2Renderer,
+            'environment_args': {},
+            'global_vars': {
+                'version': os.environ['CURRENT_VERSION_ID'],
+            },
+        }
 
-            self.app_registry.renderers['default'] = renderer_type(config=renderer_config)
+        if bool(RENDERER_CONFIG_HOOK.receivers):
+            RENDERER_CONFIG_HOOK.send(self, renderer_config=default_renderer_config)
+
+        renderer_type = default_renderer_config['type']
+        del default_renderer_config['type']
+
+        self.app_registry.renderers['default'] = renderer_type(config=default_renderer_config)
 
         self.parse_component_config(resource_config=resource_config, app_registry=self.app_registry,
                                     default_login=default_login)

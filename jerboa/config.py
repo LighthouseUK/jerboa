@@ -6,8 +6,9 @@ All you need to do is use the corresponding get methods for the data you need. T
 where applicable.
 """
 from __future__ import absolute_import
+import codecs
 from datetime import datetime
-from ConfigParser import SafeConfigParser
+from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 
 
 __author__ = 'Matt Badger'
@@ -52,3 +53,13 @@ class CustomConfigParser(SafeConfigParser):
             section = self.platform
         setting = SafeConfigParser.get(self, section, option, raw=False, vars=None)
         return setting.split(',')
+
+
+def load_config(config_file_path, platform='Development', allow_no_value=True, **kwargs):
+
+    config_instance = CustomConfigParser(platform=platform, allow_no_value=allow_no_value, **kwargs)
+
+    with codecs.open(config_file_path, 'r', encoding='utf-8') as f:
+        config_instance.readfp(f)
+
+    return config_instance
