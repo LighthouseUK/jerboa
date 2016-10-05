@@ -1,7 +1,9 @@
 import os
 from blinker import signal
-from .config import NoSectionError, NoOptionError, load_config
 from beaker.middleware import SessionMiddleware
+import webapp2
+from .config import NoSectionError, NoOptionError, load_config
+from .renderers import Jinja2Renderer
 from .app import JerboaApp, CUSTOM_DISPATCHER_REQUEST_INIT_HOOK, CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK, CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK, RENDERER_CONFIG_HOOK
 
 
@@ -54,83 +56,95 @@ class SettingsSupportedApp(JerboaApp):
 
         self.app_settings = load_config(config_file_path=config_file_path, platform=platform)
 
+        default_renderer_config = {
+            'type': Jinja2Renderer,
+            'environment_args': {},
+            'global_vars': {
+                'version': os.environ['CURRENT_VERSION_ID'],
+            },
+        }
+
+        if bool(RENDERER_CONFIG_HOOK.receivers):
+            RENDERER_CONFIG_HOOK.send(self, renderer_config=default_renderer_config, settings=self.app_settings)
+
+        renderer_type = default_renderer_config['type']
+        del default_renderer_config['type']
+
+        kwargs['default_renderer'] = renderer_type(config=default_renderer_config)
+
         # We need to setup the config parser before calling init on super; some receivers may depend on app_settings
         # being available
         super(SettingsSupportedApp, self).__init__(**kwargs)
 
-        CUSTOM_DISPATCHER_REQUEST_INIT_HOOK.connect(request_init, sender=self.router)
-        CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK.connect(response_init, sender=self.router)
-        CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.connect(default_post_request_hook, sender=self.router)
 
-
-def default_renderer_config_loader(app_instance, renderer_config):
+def default_renderer_config_loader(sender, renderer_config, settings):
     try:
-        renderer_config['environment_args']['extensions'] = app_instance.app_settings.getlist('jinja2_extensions')
+        renderer_config['environment_args']['extensions'] = settings.getlist('jinja2_extensions')
     except (NoSectionError, NoOptionError):
         renderer_config['environment_args']['extensions'] = 'jinja2.ext.autoescape,jinja2.ext.with_,jinja2.ext.i18n,jinja2.ext.do'
 
     try:
-        renderer_config['environment_args']['autoescape'] = app_instance.app_settings.getboolean('jinja2_env_autoescape')
+        renderer_config['environment_args']['autoescape'] = settings.getboolean('jinja2_env_autoescape')
     except (NoSectionError, NoOptionError):
         renderer_config['environment_args']['autoescape'] = False
 
     try:
-        renderer_config['enable_i18n'] = app_instance.app_settings.getboolean('enable_i18n')
+        renderer_config['enable_i18n'] = settings.getboolean('jinja2_enable_i18n')
     except (NoSectionError, NoOptionError):
         renderer_config['enable_i18n'] = False
 
     try:
-        renderer_config['theme_base_template_path'] = app_instance.app_settings.getlist('theme_base_template_path')
+        renderer_config['theme_base_template_path'] = settings.getlist('theme_base_template_path')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['theme'] = app_instance.app_settings.get('theme')
+        renderer_config['global_vars']['theme'] = settings.get('theme')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['base_url'] = app_instance.app_settings.get('theme_url')
+        renderer_config['global_vars']['base_url'] = settings.get('theme_url')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['css_url'] = app_instance.app_settings.get('theme_css_url')
+        renderer_config['global_vars']['css_url'] = settings.get('theme_css_url')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['js_url'] = app_instance.app_settings.get('theme_js_url')
+        renderer_config['global_vars']['js_url'] = settings.get('theme_js_url')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['common_assets_url'] = app_instance.app_settings.get('theme_common_assets_url')
+        renderer_config['global_vars']['common_assets_url'] = settings.get('theme_common_assets_url')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['css_ext'] = app_instance.app_settings.get('css_ext')
+        renderer_config['global_vars']['css_ext'] = settings.get('css_ext')
     except (NoSectionError, NoOptionError):
         renderer_config['global_vars']['css_ext'] = '.css'
 
     try:
-        renderer_config['global_vars']['js_ext'] = app_instance.app_settings.get('js_ext')
+        renderer_config['global_vars']['js_ext'] = settings.get('js_ext')
     except (NoSectionError, NoOptionError):
         renderer_config['global_vars']['js_ext'] = '.js'
 
     try:
-        renderer_config['global_vars']['main_css'] = app_instance.app_settings.get('theme_main_css_url')
+        renderer_config['global_vars']['main_css'] = settings.get('theme_main_css_url')
     except (NoSectionError, NoOptionError):
         renderer_config['global_vars']['main_css'] = 'app'
 
     try:
-        renderer_config['global_vars']['base_layout'] = app_instance.app_settings.get('theme_base_layout')
+        renderer_config['global_vars']['base_layout'] = settings.get('theme_base_layout')
     except (NoSectionError, NoOptionError):
         renderer_config['global_vars']['base_layout'] = 'base.html'
 
     try:
-        renderer_config['global_vars']['home_route'] = app_instance.app_settings.get('home_route')
+        renderer_config['global_vars']['home_route'] = settings.get('home_route')
     except (NoSectionError, NoOptionError):
         renderer_config['global_vars']['home_route'] = 'default'
 
@@ -138,14 +152,31 @@ def default_renderer_config_loader(app_instance, renderer_config):
         renderer_config['global_vars']['app_info'] = {}
 
     try:
-        renderer_config['global_vars']['app_info']['app_name'] = app_instance.app_settings.get('app_name')
+        renderer_config['global_vars']['app_info']['app_name'] = settings.get('app_name')
     except (NoSectionError, NoOptionError):
         pass
 
     try:
-        renderer_config['global_vars']['app_info']['title'] = app_instance.app_settings.get('title')
+        renderer_config['global_vars']['app_info']['title'] = settings.get('title')
     except (NoSectionError, NoOptionError):
         pass
+
+    renderer_config['global_vars']['uri_for'] = webapp2.uri_for
+
+
+class DefaultApp(SettingsSupportedApp):
+    """
+    Automatically connects to some default handlers to avoid boilerplate code
+
+    """
+    def __init__(self, **kwargs):
+        RENDERER_CONFIG_HOOK.connect(default_renderer_config_loader, sender=self)
+
+        super(DefaultApp, self).__init__(**kwargs)
+
+        CUSTOM_DISPATCHER_REQUEST_INIT_HOOK.connect(request_init, sender=self.router)
+        CUSTOM_DISPATCHER_RESPONSE_INIT_HOOK.connect(response_init, sender=self.router)
+        CUSTOM_DISPATCHER_POST_PROCESS_RESPONSE_HOOK.connect(default_post_request_hook, sender=self.router)
 
 
 class FoundationApp(SessionMiddleware):
@@ -154,9 +185,7 @@ class FoundationApp(SessionMiddleware):
 
     """
     def __init__(self, config_file_path, resource_config, default_login=True, add_default_route=True, debug=None, webapp2_config=None, **kwargs):
-        RENDERER_CONFIG_HOOK.connect(default_renderer_config_loader, sender=self)
-
-        app = SettingsSupportedApp(config_file_path=config_file_path, resource_config=resource_config, default_login=default_login, add_default_route=add_default_route, debug=debug, webapp2_config=webapp2_config)
+        app = DefaultApp(config_file_path=config_file_path, resource_config=resource_config, default_login=default_login, add_default_route=add_default_route, debug=debug, webapp2_config=webapp2_config)
 
         session_opts = {
             'session.type': app.app_settings.get('session_type'),

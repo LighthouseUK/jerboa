@@ -54,6 +54,12 @@ class CustomConfigParser(SafeConfigParser):
         setting = SafeConfigParser.get(self, section, option, raw=False, vars=None)
         return setting.split(',')
 
+    def getbyteliteral(self, option, section=None, raw=False, vars=None):
+        if section is None:
+            section = self.platform
+        value = SafeConfigParser.get(self, section, option, raw=False, vars=None)
+        return bytes(value)
+
 
 def load_config(config_file_path, platform='Development', allow_no_value=True, **kwargs):
 

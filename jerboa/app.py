@@ -745,7 +745,7 @@ RENDERER_CONFIG_HOOK = signal('renderer_config_hook')
 
 
 class JerboaApp(webapp2.WSGIApplication):
-    def __init__(self, resource_config, default_login=True, add_default_route=True, debug=None, webapp2_config=None):
+    def __init__(self, resource_config, default_login=True, add_default_route=True, debug=None, webapp2_config=None, default_renderer=None):
         if debug is None:
             try:
                 debug = os.environ['SERVER_SOFTWARE'].startswith('Dev')
@@ -764,28 +764,15 @@ class JerboaApp(webapp2.WSGIApplication):
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(set_content_type, sender=self.router)
         CUSTOM_DISPATCHER_PRE_PROCESS_RESPONSE_HOOK.connect(custom_response_headers, sender=self.router)
 
-        default_renderer_config = {
-            'type': Jinja2Renderer,
-            'environment_args': {},
-            'global_vars': {
-                'version': os.environ['CURRENT_VERSION_ID'],
-            },
-        }
-
-        if bool(RENDERER_CONFIG_HOOK.receivers):
-            RENDERER_CONFIG_HOOK.send(self, renderer_config=default_renderer_config)
-
-        renderer_type = default_renderer_config['type']
-        del default_renderer_config['type']
-
-        self.app_registry.renderers['default'] = renderer_type(config=default_renderer_config)
-
         self.parse_component_config(resource_config=resource_config, app_registry=self.app_registry,
                                     default_login=default_login)
 
         if self.app_registry.routes:
             for route in AppRegistry.routes:
                 self.router.add(route)
+
+        if default_renderer is not None:
+            self.app_registry.renderers['default'] = default_renderer
 
     parse_component_config = staticmethod(parse_component_config)
 
@@ -1028,13 +1015,13 @@ class BaseFormHandler(BaseHandlerMixin):
 
 def default_form_csrf_config(sender, request, response, form_config, **kwargs):
     form_config['csrf_context'] = request.environ['beaker.session']
-    form_config['csrf_secret'] = request.secrets.getbyteliteral('csrf_secret')
-    form_config['csrf_time_limit'] = timedelta(minutes=request.secrets.getint('csrf_time_limit'))
+    form_config['csrf_secret'] = request.settings.getbyteliteral('csrf_secret')
+    form_config['csrf_time_limit'] = timedelta(minutes=request.settings.getint('csrf_time_limit'))
 
 
 def default_form_recaptcha_config(sender, request, response, form_config, **kwargs):
-    form_config['recaptcha_site_key'] = request.secrets.get('recaptcha_site_key')
-    form_config['recaptcha_site_secret'] = request.secrets.get('recaptcha_site_secret')
+    form_config['recaptcha_site_key'] = request.settings.get('recaptcha_site_key')
+    form_config['recaptcha_site_secret'] = request.settings.get('recaptcha_site_secret')
 
 
 def remove_form_uid(handler, request, response, form_instance, hook_name):
@@ -1085,6 +1072,31 @@ class StandardUIHandler(BaseHandlerMixin):
                 self.ui_failed_hook.send(self, request=request, response=response, hook_name=self.UI_FAILED_HOOK_NAME)
 
             self._initiate_redirect(request, response)
+
+
+"""
+The hook names are repeated here with instances of signals. That way, implementors don't need to import blinker
+directly; keeps code to a minimum.
+
+We have kept the definitions in the handlers so that you have the option of pickling them. There could be some
+interesting experiments with caching to avoid the first load overhead on GAE.
+"""
+UI_HOOK_NAME = 'ui'
+FORM_CONFIG_HOOK_NAME = 'form_config'
+CUSTOMIZE_FORM_HOOK_NAME = 'customize_form'
+VALID_FORM_HOOK_NAME = 'valid_form'
+FORM_ERROR_HOOK_NAME = 'form_error'
+DUPLICATE_VALUE_HOOK_NAME = 'duplicate_value'
+CALLBACK_FAILED_HOOK_NAME = 'callback_failed'
+UI_FAILED_HOOK_NAME = 'ui_failed'
+UI_HOOK = signal(UI_HOOK_NAME)
+FORM_CONFIG_HOOK = signal(FORM_CONFIG_HOOK_NAME)
+CUSTOMIZE_FORM_HOOK = signal(CUSTOMIZE_FORM_HOOK_NAME)
+VALID_FORM_HOOK = signal(VALID_FORM_HOOK_NAME)
+FORM_ERROR_HOOK = signal(FORM_ERROR_HOOK_NAME)
+DUPLICATE_VALUE_HOOK = signal(DUPLICATE_VALUE_HOOK_NAME)
+CALLBACK_FAILED_HOOK = signal(CALLBACK_FAILED_HOOK_NAME)
+UI_FAILED_HOOK = signal(UI_FAILED_HOOK_NAME)
 
 
 class StandardFormHandler(BaseFormHandler):
@@ -1545,7 +1557,7 @@ class ScratchSpace(object):
     pass
 
 
-def set_content_type(sender, request, response):
+def set_content_type(sender, request, response, **kwargs):
     """
     Designed to be used via a blinker signal, hence the 'sender' arg.
 
@@ -1570,7 +1582,7 @@ def set_content_type(sender, request, response):
         pass
 
 
-def custom_response_headers(sender, request, response):
+def custom_response_headers(sender, request, response, **kwargs):
     """
     Designed to be used via a blinker signal, hence the 'sender' arg.
 
